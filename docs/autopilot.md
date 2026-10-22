@@ -47,6 +47,9 @@ Environment:
 - **Invocation:** one decode step (per-token op graph), summed per turn. Prefill is a step with n_new tokens.
 - **KV precision:** the search uses only fp16 and int8 KV. The model does not charge for accuracy loss, so int4 would always look free. It can be added back once accuracy on the task is measured.
 - **Podman storage:** overlay via fuse-overlayfs. vfs filled the disk (245 GB for 36 GB of images).
+- **Tool time:** reported net of the measured podman exec + login-shell overhead (~0.28 s/call); raw times are kept in the summary TSV.
+- **GPU baseline per session:** measured decode and prefill from the trace; the G1 curve is the cross-check (it predicts measured decode within -2 to -3%).
+- **Sample size:** expanded to 100 SWE-bench Verified tasks (the 20 plus 80 more, stratified by repo, seed 1), since sessions take ~1 min each.
 - **Domeline readings:** taken from the integrator's term breakdown until the Domeline plotting code is available.
 
 ## Log
@@ -61,3 +64,5 @@ Environment:
 - 05:05 G1 done. VRAM walls: Q8_0 32-36K (fp16 KV), 64-80K (int8), 96-128K (int4); Q4_K_M 40-48K / 80-96K / 128-160K. H3 done: host stream 57 GB/s; LM head 7 ms (8 threads). My attention kernel reaches only ~12 GB/s on the KV, so host attention is likely pessimistic; check against llama.cpp CPU decode when the CPU is free.
 - 05:15 Trace collection started (20 sessions). First turns: decode 8.6 ms/token, prefix caching works, and most tool calls are ~0.28 s of podman exec overhead, i.e. ~ms of real work.
 - 05:35 LLM agent searcher works through `claude -p` (no --bare: it breaks auth; run from /tmp). Haiku: 8 evals reach 1.30x on synthetic sessions for $0.008.
+- 05:55 First 20-session run: v1 checks step_limit against the model's call count, and the model object was shared, so sessions 9-20 hit LimitsExceeded. Fixed (fresh model per session); re-running those 12. The first 8 are valid: decode 84%, prefill 4%, tools 12% raw / ~4% net of exec overhead; final context median 12K, max 26K, so none reach the 3080's wall.
+- 06:10 Workload replay with shared per-design curves (chunked prefill): worst error 0.22% vs the exact per-turn replay, 6.5x faster, and constant in the number of sessions. G3 cross-check: the G1 curve predicts measured session decode within -2 to -3%.

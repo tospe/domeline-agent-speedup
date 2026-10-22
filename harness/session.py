@@ -188,8 +188,12 @@ class GpuBaseline:
         self.curve = Curve(np.maximum(self.depths, 1), [p[1] for p in pts])
         self.prefill_tok_s = prefill_tok_s
 
-    def session_time(self, session: Session, measured_prefill=True):
-        dec = sum(self.curve.sum_tokens(t.ctx_start, t.gen_tokens) for t in session.turns)
+    def session_time(self, session: Session, measured_prefill=True, measured_decode=True):
+        """GPU time for a session: measured in the trace where available, else from the G1 curve."""
+        if measured_decode and all(t.t_decode_gpu_s is not None for t in session.turns):
+            dec = sum(t.t_decode_gpu_s for t in session.turns)
+        else:
+            dec = sum(self.curve.sum_tokens(t.ctx_start, t.gen_tokens) for t in session.turns)
         pre = 0.0
         for t in session.turns:
             if measured_prefill and t.t_prefill_gpu_s is not None:
@@ -198,3 +202,54 @@ class GpuBaseline:
                 pre += t.prefill_tokens / self.prefill_tok_s
         return {"decode": dec, "prefill": pre, "tools": session.tool_time,
                 "total": dec + pre + session.tool_time, "hits_wall": session.max_ctx > self.wall}
+
+
+class WorkloadReplayer:
+    """Times a set of sessions on a design from shared per-token curves.
+
+    Decode: per-token step time vs context (exact up to grid interpolation).
+    Prefill: a chunk of n tokens at context L costs n * p(L), with p(L) the
+    per-token cost of a `chunk`-token prefill step at L. Prefill steps are
+    linear in tokens on every unit here except for per-step fixed costs
+    (launches, reprogramming), which the chunk amortizes; see tests/test_replay.py
+    for the error against Replayer.run.
+    """
+
+    def __init__(self, integrator, grid_points=48, chunk=256):
+        self.integ = integrator
+        self.grid_points = grid_points
+        self.chunk = chunk
+
+    def run(self, design, sessions):
+        max_ctx = max(s.max_ctx for s in sessions)
+        grid = ctx_grid(max_ctx, self.grid_points)
+        dec = [self.integ.step(design, 1, int(L)) for L in grid]
+        pre = [self.integ.step(design, self.chunk, max(int(L), self.chunk), logits_tokens=1) for L in grid]
+        tkeys = sorted({k for s in dec + pre for k in s.terms})
+        kkeys = sorted({k for s in dec + pre for k in s.by_kind})
+        dT = {k: Curve(grid, [s.terms.get(k, 0.0) for s in dec]) for k in tkeys}
+        dK = {k: Curve(grid, [s.by_kind.get(k, 0.0) for s in dec]) for k in kkeys}
+        pT = {k: Curve(grid, [s.terms.get(k, 0.0) / self.chunk for s in pre]) for k in tkeys}
+        pK = {k: Curve(grid, [s.by_kind.get(k, 0.0) / self.chunk for s in pre]) for k in kkeys}
+        first_over = None
+        if any(s.over_capacity for s in dec):
+            first_over = Replayer(self.integ)._first_over(design, grid, dec)
+        out = []
+        for sess in sessions:
+            terms = {k: 0.0 for k in tkeys}
+            by_kind = {k: 0.0 for k in kkeys}
+            for t in sess.turns:
+                for k in tkeys:
+                    terms[k] += dT[k].sum_tokens(t.ctx_start, t.gen_tokens)
+                    if t.prefill_tokens:
+                        terms[k] += t.prefill_tokens * float(pT[k].at(t.ctx_start))
+                for k in kkeys:
+                    by_kind[k] += dK[k].sum_tokens(t.ctx_start, t.gen_tokens)
+                    if t.prefill_tokens:
+                        by_kind[k] += t.prefill_tokens * float(pK[k].at(t.ctx_start))
+            llm = sum(terms.values())
+            over = first_over if first_over is not None and first_over <= sess.max_ctx else None
+            out.append(SessionResult(total=llm + sess.tool_time, llm=llm, tools=sess.tool_time,
+                                     terms=terms, by_kind=by_kind, over_capacity_at=over,
+                                     max_ctx=sess.max_ctx, decode_curve=None))
+        return out

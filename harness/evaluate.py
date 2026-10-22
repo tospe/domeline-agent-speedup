@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
 from .integrator import Integrator
-from .session import GpuBaseline, Replayer
+from .session import GpuBaseline, WorkloadReplayer
 from .space import Space, canonical, key
 
 
@@ -81,12 +81,10 @@ class Evaluator:
         design, lib = self.space.to_design(p)
         integ = Integrator(self.space.model, lib)
         integ._ops_cache = self._base._ops_cache
-        rep = Replayer(integ)
         terms, by_kind = {}, {}
         llm = tools = 0.0
         wall = None
-        for s in self.sessions:
-            r = rep.run(design, s)
+        for r in WorkloadReplayer(integ).run(design, self.sessions):
             llm += r.llm
             tools += r.tools
             for k2, v in r.terms.items():

@@ -146,9 +146,9 @@ def main():
     ds = {r["instance_id"]: r for r in load_dataset("princeton-nlp/SWE-bench_Verified", split="test")}
     out = Path(args.out)
     out.mkdir(parents=True, exist_ok=True)
-    model = LlamaServerModel(args.base_url, temperature=config["model"]["model_kwargs"]["temperature"])
-
     for iid in ids:
+        # A fresh model per session: v1 checks step_limit against the model's call count.
+        model = LlamaServerModel(args.base_url, temperature=config["model"]["model_kwargs"]["temperature"])
         sess_dir = out / iid
         if (sess_dir / "result.json").exists():
             continue
