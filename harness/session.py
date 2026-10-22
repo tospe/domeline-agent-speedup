@@ -103,6 +103,7 @@ class SessionResult:
     llm: float
     tools: float
     terms: Dict[str, float]          # LLM-side terms, summed over the session
+    by_kind: Dict[str, float]        # LLM-side time per op kind (+ "link")
     over_capacity_at: Optional[int]  # first context length where the design runs out of room
     max_ctx: int
     decode_curve: Curve
@@ -120,12 +121,13 @@ class Replayer:
         steps = [self.integ.step(design, 1, int(L)) for L in grid]
         keys = sorted({k for s in steps for k in s.terms})
         curves = {k: Curve(grid, [s.terms.get(k, 0.0) for s in steps]) for k in keys}
+        kinds = sorted({k for s in steps for k in s.by_kind})
+        kind_curves = {k: Curve(grid, [s.by_kind.get(k, 0.0) for s in steps]) for k in kinds}
         total = Curve(grid, [s.total for s in steps])
-        over = [int(L) for L, s in zip(grid, steps) if s.over_capacity]
         first_over = None
-        if over:
+        if any(s.over_capacity for s in steps):
             first_over = self._first_over(design, grid, steps)
-        return total, curves, first_over
+        return total, curves, kind_curves, first_over
 
     def _first_over(self, design, grid, steps):
         bad = [i for i, s in enumerate(steps) if s.over_capacity]
@@ -142,19 +144,24 @@ class Replayer:
         return hi
 
     def run(self, design, session: Session, prefill=True):
-        total_c, curves, first_over = self.decode_terms(design, session.max_ctx)
+        total_c, curves, kind_curves, first_over = self.decode_terms(design, session.max_ctx)
         terms = {k: 0.0 for k in curves}
+        by_kind = {k: 0.0 for k in kind_curves}
         for t in session.turns:
             L0 = t.ctx_start
             for k, c in curves.items():
                 terms[k] += c.sum_tokens(L0, t.gen_tokens)
+            for k, c in kind_curves.items():
+                by_kind[k] += c.sum_tokens(L0, t.gen_tokens)
             if prefill and t.prefill_tokens:
                 r = self.integ.step(design, t.prefill_tokens, t.ctx_start, logits_tokens=1)
                 for k, v in r.terms.items():
                     terms[k] = terms.get(k, 0.0) + v
+                for k, v in r.by_kind.items():
+                    by_kind[k] = by_kind.get(k, 0.0) + v
         llm = sum(terms.values())
         tools = session.tool_time
-        return SessionResult(total=llm + tools, llm=llm, tools=tools, terms=terms,
+        return SessionResult(total=llm + tools, llm=llm, tools=tools, terms=terms, by_kind=by_kind,
                              over_capacity_at=first_over if first_over and first_over <= session.max_ctx else None,
                              max_ctx=session.max_ctx, decode_curve=total_c)
 

@@ -36,6 +36,7 @@ class StepResult:
     link_bytes: float
     capacity: Dict[str, Dict[str, float]]
     over_capacity: bool
+    by_kind: Dict[str, float] = None              # seconds per op kind (link costs under "link")
 
     def term(self, k):
         return self.terms.get(k, 0.0)
@@ -184,8 +185,15 @@ class Integrator:
             terms["write"] += math.ceil(overflow / ports) * xbar_write_rows_time(t, t.p("rows"))
 
         total = sum(terms.values())
+        by_kind = defaultdict(float)
+        for _, kind, _, sec in per_op:
+            by_kind[kind] += sec
+        by_kind["link"] = terms.get("launch", 0.0) + terms.get("transfer", 0.0)
+        if terms.get("write") and not any(k == "kv_append" for k in by_kind):
+            by_kind["reprogram"] = terms["write"]
         return StepResult(total=total, terms=dict(terms), per_op=per_op, crossings=crossings,
-                          link_bytes=link_bytes, capacity=cap, over_capacity=bool(over))
+                          link_bytes=link_bytes, capacity=cap, over_capacity=bool(over),
+                          by_kind=dict(by_kind))
 
     # -- per-op cost -----------------------------------------------------------
 
