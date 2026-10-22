@@ -35,6 +35,9 @@ KNOB_HELP = {
     "star_units": "fixed-function nonlinear unit instances",
     "link": "CPU-coprocessor coupling (cxl < package < die: faster, more effort)",
     "kv_bits": "KV cache precision",
+    "xbar_tile": "crossbar tile (lean: no eDRAM buffer/bus, -47% tile area, 2 months)",
+    "adc_per_ima": "ADCs per 8 crossbars (fewer: -31% tile area at 2, but each read takes 8/n times longer)",
+    "cell_bits": "bits per ReRAM cell (4: half the arrays, 1.27x area per array, 1 us write-verify row writes, 3 months)",
 }
 
 SYSTEM = """You design a processing-in-memory (PIM) coprocessor that sits next to a CPU and runs \

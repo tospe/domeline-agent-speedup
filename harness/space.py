@@ -34,7 +34,23 @@ LINKS = {
 EFFORT = {
     "link": {"cxl": 0, "package": 3, "die": 9},
     "vfu_bw": {64e9: 0, 256e9: 1, 1e12: 3},
+    "xbar_tile": {"isaac": 0, "lean": 2},     # assumption: tile redesign without the eDRAM buffer
+    "adc_per_ima": {8: 0, 4: 0, 2: 0},
+    "cell_bits": {2: 0, 4: 3},                # assumption: multi-level programming with write-verify
 }
+
+# Crossbar tile area, ISAAC ISCA 2016 Table I (32 nm; tile 0.372 mm2 = 12 IMAs x 8 xbars):
+# 8 ADCs per IMA at 0.0012 mm2 each (31% of the tile), and a 64 KB eDRAM buffer (0.083 mm2)
+# plus its 384-wire bus to the IMAs (0.090 mm2), 47% of the tile.
+XBARS_PER_TILE = 96
+ADC_MM2 = 0.0012
+ADC_PER_XBAR_MM2 = ADC_MM2 * 8 * 12 / XBARS_PER_TILE            # 0.0012 mm2 per xbar at 8 ADCs/IMA
+EDRAM_BUS_PER_XBAR_MM2 = (0.083 + 0.090) / XBARS_PER_TILE       # 0.00180 mm2 per xbar
+# 4 bits per cell (ISAAC Sec. VII): two more ADC bits, computational efficiency -21% at the same
+# throughput, i.e. 1/0.79 = 1.27x area per crossbar (derived); twice the bits per array.
+# Cells programmed to 16 levels need write-verify: row writes take the 1 us write-verify corner.
+CELL4_AREA_X = 1 / 0.79
+CELL4_T_WRITE_ROW_S = 1.0e-6
 
 KNOBS: Dict[str, List] = {
     "mvm": ["xbar", "cpu"],                      # weight MVMs of every layer
@@ -51,6 +67,12 @@ KNOBS: Dict[str, List] = {
     "star_units": [1, 4, 16, 64],
     "link": ["cxl", "package", "die"],
     "kv_bits": [16, 8],      # int4 KV left out: its accuracy cost is not modeled
+    # Area knobs (ISAAC Table I breakdown). "lean" drops the tile's eDRAM buffer and bus:
+    # decode activations are a few KB per layer and stream through the IMA input registers.
+    # Fewer ADCs per IMA: each ADC serves more columns, so a read takes 8/adc_per_ima times longer.
+    "xbar_tile": ["isaac", "lean"],
+    "adc_per_ima": [8, 4, 2],
+    "cell_bits": [2, 4],
 }
 
 # Knobs that matter only when another knob takes a value (for counting distinct designs).
@@ -61,18 +83,22 @@ ACTIVE_IF = {
     "vfu_bw": lambda p: p["attention"] == "vfu",
     "vfu_mem": lambda p: p["attention"] == "vfu",
     "star_units": lambda p: "star" in (p["softmax"], p["vector"]),
+    "xbar_tile": lambda p: "xbar" in (p["mvm"], p["lm_head"], p["attention"]),
+    "adc_per_ima": lambda p: "xbar" in (p["mvm"], p["lm_head"], p["attention"]),
+    "cell_bits": lambda p: "xbar" in (p["mvm"], p["lm_head"], p["attention"]),
 }
 
 START = {  # step 1 of the walk: crossbars run the weight MVMs, the host runs the rest
     "mvm": "xbar", "lm_head": "cpu", "attention": "cpu", "xbar_tech": "xbar_isaac",
     "softmax": "cpu", "vector": "cpu", "edge": "cpu", "xbar_scale": 1.25,
     "vfu_units": 1, "vfu_bw": 64e9, "vfu_mem": 4e9, "star_units": 1, "link": "cxl", "kv_bits": 16,
+    "xbar_tile": "isaac", "adc_per_ima": 8, "cell_bits": 2,
 }
 
 
 def canonical(p):
     """Point with inactive knobs reset, so equivalent designs share one key."""
-    q = dict(p)
+    q = {**START, **p}          # points from before a knob existed take its default
     for k, active in ACTIVE_IF.items():
         if not active(q):
             q[k] = START[k]
@@ -118,11 +144,28 @@ class Space:
             m[k] = tech[p["edge"]]
         return m
 
+    def xbar_lib(self, p):
+        """The library with the crossbar tech adjusted by the area knobs (tile, ADCs, cell bits)."""
+        p = canonical(p)
+        if not ACTIVE_IF["xbar_tile"](p) or (p["xbar_tile"], p["adc_per_ima"], p["cell_bits"]) == ("isaac", 8, 2):
+            return self.lib
+        lib = dict(self.lib)
+        x = lib[p["xbar_tech"]]
+        area = x.area_mm2_per_unit - ADC_PER_XBAR_MM2 * (1 - p["adc_per_ima"] / 8)
+        if p["xbar_tile"] == "lean":
+            area -= EDRAM_BUS_PER_XBAR_MM2
+        params = {**x.params, "t_read_s": x.p("t_read_s") * 8 / p["adc_per_ima"]}
+        if p["cell_bits"] == 4:
+            area *= CELL4_AREA_X
+            params.update(bits_per_cell=4, t_write_row_s=CELL4_T_WRITE_ROW_S)
+        lib[p["xbar_tech"]] = type(x)(**{**x.__dict__, "area_mm2_per_unit": area, "params": params})
+        return lib
+
     def xbar_need(self, p, ctx=None):
         """Arrays the crossbar part of design p needs at context ctx (default ref_ctx)."""
         from .integrator import Integrator
         d = Design(mapping=self._mapping(p), units={}, kv_bits=p["kv_bits"], host=self.host)
-        cap = Integrator(self.model, self.lib).capacity(d, ctx or self.ref_ctx,
+        cap = Integrator(self.model, self.xbar_lib(p)).capacity(d, ctx or self.ref_ctx,
                                                         forward_ops(self.model, 1, ctx or self.ref_ctx))
         return cap.get(p["xbar_tech"], {}).get("needed", 0)
 
@@ -133,7 +176,7 @@ class Space:
             units[p["xbar_tech"]] = int(math.ceil(p["xbar_scale"] * self.xbar_need(p)))
         units[self.vfu] = p["vfu_units"]
         units[self.star] = p["star_units"]
-        lib = self.lib
+        lib = self.xbar_lib(p)
         if p["attention"] == "vfu":
             # The KV memory next to the vector unit is a knob of the design, not of the tech.
             lib = dict(lib)
@@ -158,4 +201,7 @@ class Space:
         e += EFFORT["link"][p["link"]]
         if p["attention"] == "vfu":
             e += EFFORT["vfu_bw"][p["vfu_bw"]]
+        if ACTIVE_IF["xbar_tile"](p):
+            e += EFFORT["xbar_tile"][p["xbar_tile"]] + EFFORT["adc_per_ima"][p["adc_per_ima"]] \
+                + EFFORT["cell_bits"][p["cell_bits"]]
         return e

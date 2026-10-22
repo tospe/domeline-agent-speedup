@@ -111,6 +111,9 @@ def proposals(e: Eval):
             up(why, "vfu_mem")
     if "area" in e.reason:
         why = f"area binds: {e.area_mm2:.0f} mm2 over the cap"
+        if ACTIVE_IF["xbar_tile"](p):
+            add(why + "; eDRAM buffer and bus are 47% of a tile", "xbar_tile", "lean")
+            up(why + "; ADCs are 31% of a tile", "adc_per_ima")
         down(why, "xbar_scale")
         down(why, "kv_bits")
         if p["attention"] == "xbar":
@@ -146,6 +149,7 @@ def proposals(e: Eval):
         elif term.startswith("softmax"):
             up(why, "star_units")
         elif term.startswith("xbar"):
+            down(why + "; read cycle set by ADC sharing", "adc_per_ima")
             if p["attention"] == "xbar":
                 add(why + "; attention reads grow with context", "attention", "vfu")
         elif term == "host" or term not in ("link",):
@@ -198,10 +202,10 @@ def _shrink(ev, cur, trail, tol):
     while changed:
         changed = False
         cands = []
-        for knob in LOWER_IS_SMALLER + ("link", "kv_bits"):
+        for knob in LOWER_IS_SMALLER + ("link", "kv_bits", "adc_per_ima"):
             if knob in ACTIVE_IF and not ACTIVE_IF[knob](cur.point):
                 continue
-            direction = -1 if knob != "kv_bits" else +1
+            direction = +1 if knob in ("kv_bits", "adc_per_ima") else -1
             q = step_knob(cur.point, knob, direction)
             if q:
                 cands.append((knob, q))
