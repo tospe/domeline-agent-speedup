@@ -33,7 +33,7 @@ Environment:
 | H7 | Search: Domeline-guided walk policy; baselines random, BO, subspace sweep; budgets + decision log | done (code); runs need real traces |
 | H8 | LLM-agent searcher (pluggable backend; claude -p or local llama-server) | done (claude -p, with/without readings) |
 | T1 | mini-swe-agent installed, pointed at llama-server, timing subclass logging per-turn trace schema | done; images pulling |
-| T2 | SWE-bench Verified sessions via podman (20) | running |
+| T2 | SWE-bench Verified sessions via podman | 89/100 done (11 wait on Docker Hub rate limit); wall sessions re-run with int8 KV |
 | T3 | Retrieval-agent candidate: tool-share measurement on ~5 sessions | todo |
 | F1 | Figures: profile breakdown, GPU wall, co-design walk, sample-efficiency, effort staircase, headline | scripts done (gpu_wall, trace_profile, walk, search, effort); final data pending |
 | R1 | Status report artifact for the user at the end | todo |
@@ -71,3 +71,4 @@ Environment:
 - 07:30 Effort staircase (smoke): walk 0.54x at 0 months (crossbars only), 2.26x at 1 month (vector unit), 4.12x at 4 months (nonlinear unit), 4.48x at 7 months (transposed K writes). TPE finds nothing feasible below 4 months in 100 evals.
 - 04:05 (correction: log times between 03:05 and here ran ahead of the clock; the true time now is 04:05, and times from here are real.) Pulls: 69/80 new images; 11 blocked by Docker Hub's anonymous rate limit, to retry after ~09:00. 100-task run at 32 sessions.
 - 04:35 Sensitivity (smoke workload, the walk's best design is 6.06x at 12.2K mm2): only the crossbar read cycle moves speed noticeably (6.65x at 0.5x, 5.14x at 2x). Crossbar area per array moves area linearly. Write latency, vector/nonlinear unit throughput and bandwidth, link, and host attention each move speed by <= 3%. Per-array area is therefore the number that most needs a solid source.
+- 05:30 Trace collection done: 89 sessions, 82 Submitted, 7 ContextExceeded (8% outgrow the 3080's 32K fp16 KV). The pipeline (experiments/after_traces.sh) re-runs those 7 with int8 KV at 64K, then starts the exhaustive sweep (575,400 designs, 20 workers) on the frozen workload. The 11 rate-limited tasks will be a second held-out set.
