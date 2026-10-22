@@ -203,17 +203,23 @@ class Integrator:
         group = spec.heads // spec.kv_heads
 
         if t.kind == "crossbar":
+            # Each layer's arrays are separate, so a multi-token step pipelines tokens
+            # across layers (ISAAC's inter-layer pipeline): per op, the first token pays
+            # the full latency and each further token 1/layers of it.
+            tok = op.tokens
+            if tok > 1 and t.p("layer_pipelined", False) and op.layer is not None:
+                tok = 1 + (tok - 1) / spec.layers
             if op.cls == O.MVM_STATIC:
-                return xbar_mvm_time(t, op.shape[1], tokens=op.tokens), t.name
+                return xbar_mvm_time(t, op.shape[1], tokens=tok), t.name
             if op.kind == "attn_score":
-                return xbar_mvm_time(t, spec.head_dim, tokens=op.tokens, repeats=group), t.name
+                return xbar_mvm_time(t, spec.head_dim, tokens=tok, repeats=group), t.name
             if op.kind == "attn_value":
-                return xbar_mvm_time(t, ctx, tokens=op.tokens, repeats=group), t.name
+                return xbar_mvm_time(t, ctx, tokens=tok, repeats=group), t.name
             if op.cls == O.KV_APPEND:
                 # V gains one row per token. K gains a column (head_dim rows touched)
                 # unless the array supports transposed writes.
                 k_rows = 1 if t.p("transpose_write", False) else spec.head_dim
-                return xbar_write_rows_time(t, op.tokens * (k_rows + 1)), "write"
+                return xbar_write_rows_time(t, tok * (k_rows + 1)), "write"
             raise ValueError(f"crossbar cannot run {op.kind}")
 
         if t.kind == "tiled_gemv":

@@ -139,8 +139,10 @@ def proposals(e: Eval):
             if p["attention"] == "vfu":
                 up(why + "; KV bandwidth", "vfu_bw")
             up(why, "vfu_units")
-            if p["softmax"] == "vfu" or p["vector"] == "vfu":
-                add(why + "; offload nonlinear ops to the fixed-function unit", "softmax", "star")
+            if p["softmax"] == "vfu":
+                add(why + "; softmax to the fixed-function unit", "softmax", "star")
+            if p["vector"] == "vfu":
+                add(why + "; norms and activations to the fixed-function unit", "vector", "star")
         elif term.startswith("softmax"):
             up(why, "star_units")
         elif term.startswith("xbar"):
