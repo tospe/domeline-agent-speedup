@@ -1,7 +1,8 @@
 """Fig: sample efficiency. Best feasible speedup found vs evaluations used, per search method.
 
 Lines are the median over seeds; bands span min..max. A dashed line marks the
-best design any method found (the reference optimum for "within X% of best").
+best design any method found, or the exhaustive sweep's optimum once
+experiments/sweep_analyze.py has run on the complete sweep.
 Data: results/search/<tag>.json (experiments/search_compare.py).
   python figs/fig_search.py [tag]
 """
@@ -81,13 +82,21 @@ def draw(ax, d, methods, top):
 def main(tag="main"):
     d = json.loads((ROOT / "results/search" / f"{tag}.json").read_text())
     top = max((r["best"]["speedup"] for r in d["runs"] if "best" in r), default=1)
+    # Reference: the exhaustive sweep's optimum under the same cap, when the sweep has run.
+    ref_label = f"best found {top:.2f}×"
+    sw = ROOT / "results/search/sweep_main_summary.json"
+    if sw.exists():
+        s = json.loads(sw.read_text())
+        if tag in s["searchers"] and not s["partial"]:
+            top = s["searchers"][tag]["fastest_speedup"]
+            ref_label = f"exhaustive optimum {top:.2f}× ({s['n_designs']:,} designs)"
     fs.apply()
     fig, axes = plt.subplots(1, 2, figsize=(fs.PAGE_W, 2.3), sharey=True)
     for ax, (title, methods) in zip(axes, PANELS):
         draw(ax, d, methods, top)
         ax.set_title(title, loc="left", color=fs.INK_2)
     axes[0].set_ylabel("Best speedup over RTX 3080")
-    axes[0].annotate(f"best found {top:.2f}×", (d["budget"], top), xytext=(0, 2), textcoords="offset points",
+    axes[0].annotate(ref_label, (d["budget"], top), xytext=(0, 2), textcoords="offset points",
                      ha="right", va="bottom", fontsize=6.5, color=fs.INK_2)
     print(fs.save(fig, f"search_{tag}"))
 
