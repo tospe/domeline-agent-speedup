@@ -40,39 +40,55 @@ def best_so_far(log, budget):
     return np.array(out)
 
 
-def main(tag="main"):
-    d = json.loads((ROOT / "results/search" / f"{tag}.json").read_text())
+# One color per method across panels and figures (palette slots; each panel's set validates).
+SLOT = {"walk": 0, "tpe": 1, "random": 2, "hill_climb": 3, "agent": 4, "agent_scalar": 5}
+
+PANELS = [
+    ("Classical searchers (scalar time only)", ["walk", "tpe", "random", "hill_climb"]),
+    ("LLM agents (Sonnet)", ["walk", "agent", "agent_scalar"]),
+]
+
+
+def draw(ax, d, methods, top):
     B = d["budget"]
-    fs.apply()
-    fig, ax = plt.subplots(figsize=(fs.COL_W, 2.3))
     x = np.arange(1, B + 1)
-    top = max((r["best"]["speedup"] for r in d["runs"] if "best" in r), default=1)
-    for i, (m, label) in enumerate(METHODS):
+    for slot, m in enumerate(methods):
         runs = [r for r in d["runs"] if r["method"] == m]
         if not runs:
             continue
+        label = dict(METHODS)[m]
         curves = np.stack([best_so_far(r["log"], B) for r in runs])
-        # A run that stopped early keeps its best for the rest of the budget.
-        st = fs.series(i)
+        st = fs.series(SLOT[m])
         med = np.median(curves, axis=0)
-        ax.plot(x, med, color=st["color"], linestyle=st["linestyle"], lw=1.4, label=label, zorder=3)
+        ax.plot(x, med, color=st["color"], linestyle=st["linestyle"], lw=1.4,
+                label=label + (f" (median of {len(runs)})" if len(runs) > 1 else ""), zorder=3)
         if len(runs) > 1:
             ax.fill_between(x, curves.min(0), curves.max(0), color=st["color"], alpha=0.12, lw=0)
-        used = int(np.median([r["evals"] for r in runs]))
-        ax.plot([min(used, B)], [med[min(used, B) - 1]], marker=st["marker"], color=st["color"],
-                markersize=4, zorder=4)
+        # Marker where the (median) curve first gets within 1% of the best any method found.
+        if (med >= top * 0.99).any():
+            n = int(np.argmax(med >= top * 0.99)) + 1
+            ax.plot([n], [med[n - 1]], marker=st["marker"], color=st["color"], markersize=4, zorder=4)
     ax.axhline(top, color=fs.INK_3, lw=0.7, ls=":")
     ax.axhline(1.0, color=fs.INK_2, lw=0.7, ls="--")
     ax.annotate("RTX 3080", (B, 1.0), xytext=(0, -2), textcoords="offset points", ha="right",
                 va="top", fontsize=6.5, color=fs.INK_2)
-    ax.annotate(f"best found {top:.2f}×", (B, top), xytext=(0, 2), textcoords="offset points",
-                ha="right", va="bottom", fontsize=6.5, color=fs.INK_2)
     ax.set_xlabel("Design evaluations")
-    ax.set_ylabel("Best speedup over RTX 3080")
     ax.set_xlim(1, B)
     ax.set_ylim(0, top * 1.15)
-    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.24), ncol=2, fontsize=6.3,
-              columnspacing=1.0, handlelength=2.0)
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.2), ncol=2, fontsize=6.2, columnspacing=1.0)
+
+
+def main(tag="main"):
+    d = json.loads((ROOT / "results/search" / f"{tag}.json").read_text())
+    top = max((r["best"]["speedup"] for r in d["runs"] if "best" in r), default=1)
+    fs.apply()
+    fig, axes = plt.subplots(1, 2, figsize=(fs.PAGE_W, 2.3), sharey=True)
+    for ax, (title, methods) in zip(axes, PANELS):
+        draw(ax, d, methods, top)
+        ax.set_title(title, loc="left", color=fs.INK_2)
+    axes[0].set_ylabel("Best speedup over RTX 3080")
+    axes[0].annotate(f"best found {top:.2f}×", (d["budget"], top), xytext=(0, 2), textcoords="offset points",
+                     ha="right", va="bottom", fontsize=6.5, color=fs.INK_2)
     print(fs.save(fig, f"search_{tag}"))
 
 
