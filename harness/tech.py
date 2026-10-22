@@ -99,6 +99,56 @@ def unit_rates(tech, units, cls):
 
 
 # ---------------------------------------------------------------------------
+# Measured CPU profile (H3)
+# ---------------------------------------------------------------------------
+
+class CpuProfile:
+    """Per-op seconds measured by profile/cpu_ops.c, interpolated in context length."""
+
+    def __init__(self, path, threads):
+        import numpy as np
+        rows = [l.rstrip("\n").split("\t") for l in Path(path).read_text().splitlines()[1:]]
+        by_kind = {}
+        for kind, ctx, th, sec in rows:
+            if int(th) == int(threads):
+                by_kind.setdefault(kind, []).append((int(ctx), float(sec)))
+        if not by_kind:
+            raise ValueError(f"no rows for {threads} threads in {path}")
+        self.curves = {k: (np.array([c for c, _ in sorted(v)], float),
+                           np.array([s for _, s in sorted(v)], float)) for k, v in by_kind.items()}
+        n = 64 << 20
+        self.stream_bw_Bps = 12 * n / self.curves["triad_64M"][1].min()
+
+    def has(self, kind):
+        return kind in self.curves
+
+    def time(self, kind, ctx):
+        import numpy as np
+        xs, ys = self.curves[kind]
+        if len(xs) == 1:
+            return float(ys[0])
+        if ctx > xs[-1]:   # beyond the measured range: extrapolate linearly from the last two points
+            return float(ys[-1] + (ys[-1] - ys[-2]) / (xs[-1] - xs[-2]) * (ctx - xs[-1]))
+        return float(np.interp(ctx, xs, ys))
+
+
+_PROFILES = {}
+
+
+def cpu_profile(tech):
+    path = tech.p("profile_tsv")
+    if not path:
+        return None
+    key = (path, tech.p("threads", 8))
+    if key not in _PROFILES:
+        p = Path(path)
+        if not p.is_absolute():
+            p = Path(__file__).resolve().parent.parent / p
+        _PROFILES[key] = CpuProfile(p, key[1])
+    return _PROFILES[key]
+
+
+# ---------------------------------------------------------------------------
 # Library
 # ---------------------------------------------------------------------------
 

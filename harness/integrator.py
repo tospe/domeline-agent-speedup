@@ -21,7 +21,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Tuple
 
 from . import ops as O
-from .tech import (Tech, roofline_time, tiled_gemv_time, unit_rates, xbar_arrays_for,
+from .tech import (Tech, cpu_profile, roofline_time, tiled_gemv_time, unit_rates, xbar_arrays_for,
                    xbar_mvm_time, xbar_write_rows_time)
 
 HOST, COPROC = "host", "coproc"
@@ -91,6 +91,9 @@ class Integrator:
                 have = design.units.get(name, 0)
             cap[k] = {"needed": v, "have": have}
         return cap
+
+    def capacity_over(self, design, ctx):
+        return any(c["needed"] > c["have"] for c in self.capacity(design, ctx).values())
 
     # -- one step --------------------------------------------------------------
 
@@ -210,6 +213,11 @@ class Integrator:
                 raise ValueError(f"tiled_gemv cannot run {op.kind}")
             M, N = op.shape
             return tiled_gemv_time(t, M, N, tokens=op.tokens), t.name
+
+        if t.kind == "cpu":
+            prof = cpu_profile(t)
+            if prof is not None and prof.has(op.kind):
+                return op.tokens * prof.time(op.kind, ctx), "host"
 
         if t.kind in ("digital", "dram_pim", "cpu"):
             ops_per_s, bw = unit_rates(t, units, op.cls) if t.kind != "cpu" else (

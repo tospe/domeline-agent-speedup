@@ -56,6 +56,7 @@ def forward_ops(spec, n_new=1, ctx=1, logits_tokens=None):
     ops: List[Op] = []
 
     def add(**kw):
+        kw.setdefault("tokens", S)
         ops.append(Op(**kw))
 
     add(name="embed", kind="embed", cls=GATHER, layer=None, flops=0,
@@ -132,6 +133,6 @@ def forward_ops(spec, n_new=1, ctx=1, logits_tokens=None):
     add(name="lm_head", kind="lm_head", cls=MVM_STATIC, layer=None,
         flops=2 * T * D * spec.vocab, reads=[("xf", T * D * a)],
         writes=[("logits", T * spec.vocab * a)], shape=(spec.vocab, D), tokens=T)
-    add(name="sample", kind="sample", cls=VECTOR, layer=None, flops=2 * T * spec.vocab,
+    add(name="sample", kind="sample", cls=VECTOR, layer=None, flops=2 * T * spec.vocab, tokens=T,
         reads=[("logits", T * spec.vocab * a)], writes=[("token", T * 4)])
     return ops

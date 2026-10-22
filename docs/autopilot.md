@@ -19,20 +19,20 @@ Environment:
 
 | ID | Task | Status |
 |---|---|---|
-| A1 | Python venv, micromamba, CUDA toolkit | in progress |
-| A2 | Build llama.cpp with CUDA (sm_86) | todo |
-| A3 | Download mini-coder-4b, convert to GGUF, quantize Q8_0 (+ Q4_K_M) | in progress |
-| G1 | llama-bench decode tok/s vs context depth, KV f16/q8_0/q4_0, FA on | todo |
+| A1 | Python venv, micromamba, CUDA toolkit | done |
+| A2 | Build llama.cpp with CUDA (sm_86) | done (commit e3797b1) |
+| A3 | Download mini-coder-4b, convert to GGUF, quantize Q8_0 (+ Q4_K_M) | done |
+| G1 | llama-bench decode tok/s vs context depth, KV f16/q8_0/q4_0, FA on | running |
 | G2 | Past the wall: -nkvo 1 and reduced -ngl; record the step | todo |
-| H1 | Integrator v0: model spec, decode op graph(L), tech library, mapping, transfer/launch/α·N, KV writes, capacity | todo |
-| H2 | Test: reproduce soc_inference_estimator.py BitNet numbers under its assumptions | todo |
-| H3 | CPU per-op profile of decode ops at mini-coder-4b shapes on this host (numpy/llama.cpp CPU) | todo |
-| H4 | Trace schema + session replay (synthetic context paths until real traces) | todo |
+| H1 | Integrator v0: model spec, decode op graph(L), tech library, mapping, transfer/launch/α·N, KV writes, capacity | done |
+| H2 | Test: reproduce soc_inference_estimator.py BitNet numbers under its assumptions | done (exact, 6 cases) |
+| H3 | CPU per-op profile of decode ops at mini-coder-4b shapes on this host (C microbenchmark) | code done; run after G1 |
+| H4 | Trace schema + session replay (synthetic context paths until real traces) | done |
 | H5 | Domeline readings: binding term, headroom, Amdahl bound, GPU sheet | todo |
-| H6 | Tech + ASIC library seeded from literature (ISAAC, PUMA, STAR, SRAM-CIM ISSCC macros, CAM) | todo |
+| H6 | Tech + ASIC library seeded from literature (ISAAC, PUMA, STAR, SRAM-CIM ISSCC macros, CAM) | seeded; VERIFY flags open |
 | H7 | Search: Domeline-guided walk policy; baselines random, BO, subspace sweep; budgets + decision log | todo |
 | H8 | LLM-agent searcher (pluggable backend; claude -p or local llama-server) | todo |
-| T1 | mini-swe-agent installed, pointed at llama-server, timing subclass logging per-turn trace schema | todo |
+| T1 | mini-swe-agent installed, pointed at llama-server, timing subclass logging per-turn trace schema | done; images pulling |
 | T2 | First 5 SWE-bench Verified sessions via podman | todo |
 | T3 | Retrieval-agent candidate: tool-share measurement on ~5 sessions | todo |
 | F1 | Figures: profile breakdown, GPU wall, co-design walk, sample-efficiency, effort staircase, headline | todo |
@@ -40,8 +40,17 @@ Environment:
 
 ## Decisions taken
 
-(record defaults taken without the user here)
+- **SWE-bench sample:** a repo-stratified seeded random sample of 20 Verified tasks (`traces/swebench_sample20.tsv`), not slice 0:20, which is all astropy.
+- **Agent version and prompt:** mini-swe-agent 1.17.5 with system/instance templates copied verbatim from mini-coder's training trajectories (```bash format). The current v2 prompt differs from what the model learned.
+- **Trace server:** Q8_0 weights, f16 KV, 32K context, temperature 0, step limit 250, 40 min wall limit per session. A session that outgrows 32K ends as ContextExceeded, which is recorded as hitting the wall.
+- **Containers:** rootless podman with vfs storage. The podman exec overhead is measured per session and subtracted from tool times in the replay.
+- **Invocation:** one decode step (per-token op graph), summed per turn. Prefill is a step with n_new tokens.
+- **Domeline readings:** taken from the integrator's term breakdown until the Domeline plotting code is available.
 
 ## Log
 
 - 02:55 Environment checked: RTX 3080 10 GB on this host, i9-12900K 24 threads, 30 GB RAM, 281 GB free. No nvcc, no docker; python 3.12 available. Rootless podman fixed with vfs storage. No API key in env; `claude` CLI present.
+- 03:05 llama.cpp built (CUDA 12.8 via micromamba, needed rpath fix). Model converted, Q8_0 4.28 GB, Q4_K_M 2.50 GB.
+- 03:30 G1: Q8_0/f16 KV runs 134 tok/s at depth 0 and 70 tok/s at 32K, and OOMs at 36K (the estimate was 37K). q8_0 KV is slower than f16 at equal depth (dequantization in FA) but reaches 65K.
+- 03:40 Integrator v0 reproduces TERINT's estimator exactly. mini-coder-4b on ISAAC crossbars: 982K arrays for the weights, 0.12 ms/token crossbar compute, 326 CPU<->PIM crossings per token when the host runs the non-MVM ops.
+- 03:50 mini-coder trains on the mini-swe-agent v1 prompt; installed 1.17.5 and rebuilt the prompt from the training data.

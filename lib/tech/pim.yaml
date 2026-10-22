@@ -1,0 +1,114 @@
+# Coprocessor technologies. One entry per technology; `units` in a Design
+# sets how many arrays / lanes a design instantiates.
+#
+# maturity: published-silicon (measured chip) | simulated (published, modeled)
+#           | projected (our assumption; must be checked before the paper)
+# Entries whose notes say VERIFY have numbers recalled from the cited paper
+# that still need checking against the PDF.
+
+- name: xbar_isaac
+  kind: crossbar
+  supports: [mvm_static, mvm_dynamic, kv_append]
+  source: "Shafiee et al., ISAAC, ISCA 2016 (Table: 128x128 xbar, 2 b/cell, 1-b DAC, 8-b ADC @1.28 GS/s shared by 128 cols)"
+  maturity: simulated
+  effort_months: 0
+  # Tile 0.372 mm^2 (32 nm) holds 12 IMAs x 8 xbars = 96 xbars, so 0.00388 mm^2 per
+  # xbar with its ADCs, eDRAM and routing amortized in.
+  area_mm2_per_unit: 0.00388
+  params:
+    rows: 128
+    cols: 128
+    bits_per_cell: 2
+    input_bits: 8          # int8 activations
+    dac_bits: 1            # bit-serial inputs: 8 read cycles per MVM
+    t_read_s: 100e-9       # one read cycle: 128 columns through one 1.28 GS/s ADC
+    t_add_s: 1e-9          # one level of the partial-sum adder tree
+    t_write_row_s: 50.88e-9   # PipeLayer (HPCA 2017) ReRAM write latency, single pulse
+    write_parallel_arrays: 1024
+    transpose_write: false
+  notes: "ISAAC does not write at run time; write latency taken from PipeLayer. VERIFY t_write_row_s and whether multi-level cells need write-verify (~10x)."
+
+- name: xbar_isaac_wv
+  kind: crossbar
+  supports: [mvm_static, mvm_dynamic, kv_append]
+  source: "ISAAC geometry; write-verify for 2-bit cells assumed at ~1 us per row"
+  maturity: projected
+  effort_months: 0
+  area_mm2_per_unit: 0.00388
+  params:
+    rows: 128
+    cols: 128
+    bits_per_cell: 2
+    input_bits: 8
+    dac_bits: 1
+    t_read_s: 100e-9
+    t_add_s: 1e-9
+    t_write_row_s: 1.0e-6
+    write_parallel_arrays: 1024
+    transpose_write: false
+  notes: "Pessimistic write corner for the sensitivity study."
+
+- name: xbar_transpose
+  kind: crossbar
+  supports: [mvm_static, mvm_dynamic, kv_append]
+  source: "ISAAC geometry with a transposable write path (K append becomes one row write)"
+  maturity: projected
+  effort_months: 3
+  area_mm2_per_unit: 0.0045
+  params:
+    rows: 128
+    cols: 128
+    bits_per_cell: 2
+    input_bits: 8
+    dac_bits: 1
+    t_read_s: 100e-9
+    t_add_s: 1e-9
+    t_write_row_s: 50.88e-9
+    write_parallel_arrays: 1024
+    transpose_write: true
+  notes: "Area +15% for the second write driver set is an assumption. VERIFY against a published transposable ReRAM/SRAM array."
+
+- name: vfu_puma
+  kind: digital
+  supports: [vector, kv_append, mvm_dynamic, gather]
+  source: "Ankit et al., PUMA, ASPLOS 2019 (vector functional unit next to the MVM units)"
+  maturity: simulated
+  effort_months: 1
+  area_mm2_per_unit: 0.004
+  params:
+    ops_per_s: 4.0e9            # per unit: 4 lanes at 1 GHz
+    mem_bw_Bps: 64.0e9          # local SRAM/eDRAM read bandwidth for KV, total
+    bw_scales_with_units: false
+    local_mem_bytes: 8.0e9      # KV store next to the unit (stacked DRAM), total
+    mem_scales_with_units: false
+    op_overhead_s: 5.0e-9
+  notes: "One unit = one PUMA-style VFU. VERIFY VFU width and clock in PUMA Table 3. KV memory size/bandwidth are design knobs, not from PUMA."
+
+- name: softmax_star
+  kind: digital
+  supports: [vector]
+  source: "Zhai et al., STAR softmax engine, arXiv 2401.17582 (concept); throughput is a sizing knob"
+  maturity: projected
+  effort_months: 4
+  area_mm2_per_unit: 0.02
+  params:
+    ops_per_s: 64.0e9
+    mem_bw_Bps: 256.0e9
+    op_overhead_s: 2.0e-9
+  notes: "Fixed-function nonlinear unit (softmax, norms, SiLU). Numbers are placeholders to size; VERIFY against STAR's reported throughput/area."
+
+- name: upmem_dpu
+  kind: dram_pim
+  supports: [mvm_static, mvm_dynamic, vector, kv_append]
+  source: "UPMEM measured on a 2,560-DPU server (VIPER case study): 48 MOPS int8 MAC/DPU, T_transfer = 1.82 ms + 1.68 us x N"
+  maturity: published-silicon
+  effort_months: 0
+  area_mm2_per_unit: 0.0
+  params:
+    ops_per_s: 96.0e6          # 48 M MAC/s = 96 M op/s per DPU
+    bank_bw_Bps: 0.63e9        # MRAM->WRAM per DPU (Gomez-Luna et al., IEEE Access 2022). VERIFY
+    local_mem_bytes: 64.0e6    # MRAM per DPU
+    mem_scales_with_units: true
+    host_scatter: true
+    op_overhead_s: 0.0
+  notes: "Not a contender; included so the harness can reject it. Link for UPMEM designs: t0_s=1.82e-3, alpha_s_per_unit=1.68e-6."
