@@ -54,9 +54,10 @@ def draw(ax, weights, show_ylabel=True):
         ax.plot(xs, ys, color=st["color"], marker=st["marker"], linestyle=st["linestyle"],
                 markevery=1, label=KV_LABEL[kv], zorder=3)
         if kv in fails:
-            wall = (pts[kv][-1][0] + fails[kv]) / 2 / 1024
-            ax.plot([wall], [ys[-1]], marker="x", color=fs.INK, markersize=5, zorder=4)
-            fs.label_end(ax, wall, ys[-1], f"wall ~{wall:.0f}K", dx=3, dy=-7)
+            lo, hi = pts[kv][-1][0] / 1024, fails[kv] / 1024
+            ax.axvspan(lo, hi, color=st["color"], alpha=0.12, lw=0, zorder=1)
+            ax.annotate(f"out of VRAM\n{lo:.0f}-{hi:.0f}K", (hi, ys[-1]), xytext=(3, 0),
+                        textcoords="offset points", va="center", ha="left", color=fs.INK_2, fontsize=6.5)
         for (kv2, mode), p in g2.items():
             if kv2 == kv:
                 ax.plot([d / 1024 for d, _ in p], [ms for _, ms in p], color=st["color"],
@@ -64,14 +65,14 @@ def draw(ax, weights, show_ylabel=True):
     ax.set_xlabel("Context length (K tokens)")
     if show_ylabel:
         ax.set_ylabel("Decode time per token (ms)")
-    ax.set_ylim(0, ymax * 1.15)
-    ax.set_xlim(left=0)
+    ax.set_ylim(0, ymax * 1.12)
+    ax.set_xlim(0, max(fails.values()) / 1024 * 1.28 if fails else None)
     ax.set_title(f"{weights} weights", loc="left", color=fs.INK_2)
 
 
 def main():
     fs.apply()
-    fig, axes = plt.subplots(1, 2, figsize=(fs.PAGE_W * 0.75, 2.0), sharey=False)
+    fig, axes = plt.subplots(1, 2, figsize=(fs.PAGE_W, 2.1), sharey=True)
     draw(axes[0], "Q8_0")
     draw(axes[1], "Q4_K_M", show_ylabel=False)
     axes[0].legend(loc="upper left")

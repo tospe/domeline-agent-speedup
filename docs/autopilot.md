@@ -22,18 +22,18 @@ Environment:
 | A1 | Python venv, micromamba, CUDA toolkit | done |
 | A2 | Build llama.cpp with CUDA (sm_86) | done (commit e3797b1) |
 | A3 | Download mini-coder-4b, convert to GGUF, quantize Q8_0 (+ Q4_K_M) | done |
-| G1 | llama-bench decode tok/s vs context depth, KV f16/q8_0/q4_0, FA on | running |
+| G1 | llama-bench decode tok/s vs context depth, KV f16/q8_0/q4_0, FA on | done; figures/gpu_wall.pdf |
 | G2 | Past the wall: -nkvo 1 and reduced -ngl; record the step | todo |
 | H1 | Integrator v0: model spec, decode op graph(L), tech library, mapping, transfer/launch/α·N, KV writes, capacity | done |
 | H2 | Test: reproduce soc_inference_estimator.py BitNet numbers under its assumptions | done (exact, 6 cases) |
-| H3 | CPU per-op profile of decode ops at mini-coder-4b shapes on this host (C microbenchmark) | code done; run after G1 |
+| H3 | CPU per-op profile of decode ops at mini-coder-4b shapes on this host (C microbenchmark) | done; results/cpu/cpu_ops.tsv |
 | H4 | Trace schema + session replay (synthetic context paths until real traces) | done |
 | H5 | Domeline readings: binding term, headroom, Amdahl bound, GPU sheet | todo |
 | H6 | Tech + ASIC library seeded from literature (ISAAC, PUMA, STAR, SRAM-CIM ISSCC macros, CAM) | seeded; VERIFY flags open |
-| H7 | Search: Domeline-guided walk policy; baselines random, BO, subspace sweep; budgets + decision log | todo |
-| H8 | LLM-agent searcher (pluggable backend; claude -p or local llama-server) | todo |
+| H7 | Search: Domeline-guided walk policy; baselines random, BO, subspace sweep; budgets + decision log | done (code); runs need real traces |
+| H8 | LLM-agent searcher (pluggable backend; claude -p or local llama-server) | done (claude -p, with/without readings) |
 | T1 | mini-swe-agent installed, pointed at llama-server, timing subclass logging per-turn trace schema | done; images pulling |
-| T2 | First 5 SWE-bench Verified sessions via podman | todo |
+| T2 | SWE-bench Verified sessions via podman (20) | running |
 | T3 | Retrieval-agent candidate: tool-share measurement on ~5 sessions | todo |
 | F1 | Figures: profile breakdown, GPU wall, co-design walk, sample-efficiency, effort staircase, headline | todo |
 | R1 | Status report artifact for the user at the end | todo |
@@ -58,3 +58,6 @@ Environment:
 - 03:50 mini-coder trains on the mini-swe-agent v1 prompt; installed 1.17.5 and rebuilt the prompt from the training data.
 - 04:25 Disk reached 99% (vfs layer copies). Switched podman to fuse-overlayfs and re-pulled the images: 34 GB used.
 - 04:30 Search stack (space, evaluator, walk, baselines) runs. On 3 synthetic sessions the walk goes 0.09x -> 1.34x vs the GPU in 29 evals, then shrinks area 16.8K -> 6.7K mm2. Area is ~11 3080 dies, so the search needs an area cap.
+- 05:05 G1 done. VRAM walls: Q8_0 32-36K (fp16 KV), 64-80K (int8), 96-128K (int4); Q4_K_M 40-48K / 80-96K / 128-160K. H3 done: host stream 57 GB/s; LM head 7 ms (8 threads). My attention kernel reaches only ~12 GB/s on the KV, so host attention is likely pessimistic; check against llama.cpp CPU decode when the CPU is free.
+- 05:15 Trace collection started (20 sessions). First turns: decode 8.6 ms/token, prefix caching works, and most tool calls are ~0.28 s of podman exec overhead, i.e. ~ms of real work.
+- 05:35 LLM agent searcher works through `claude -p` (no --bare: it breaks auth; run from /tmp). Haiku: 8 evals reach 1.30x on synthetic sessions for $0.008.
