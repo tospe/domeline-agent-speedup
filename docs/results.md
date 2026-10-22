@@ -80,9 +80,18 @@ All 575,400 distinct designs on the 45 search sessions (11.5 h on 20 cores). 280
   - Sonnet and Haiku agents: within 1% in 9–15 evals on 9 of 10 runs.
 - Exhaustive search needs 575,400 evaluations to find the optimum. The walk needs 20–30, so this space did not need brute force. The model makes brute force affordable here, but not with a gem5-class evaluator at 1–3 h per point.
 
+## Second held-out set (`experiments/heldout_extra.py`)
+
+These are 11 SWE-bench tasks that Docker Hub rate limits blocked during collection. They were run after every search had finished, so no search, library or space decision saw them. The design is built exactly as in the search.
+
+- 4 of 11 hit the fp16 wall (36%, vs 8% in the main set), and were re-run with int8 KV at 64K like the main set. Of the 11, 10 submitted a patch. sympy-23413 hit the 250-step limit after 250 turns.
+- **Walk design: 15.4× here** (9.42× search, 9.61× first held-out). 14.1× without sympy-23413. **5-month design: 12.1×** (11.1× without sympy-23413).
+- These sessions spend less time in tools, so the tools-only bound is 54× vs 17×, and the speedup is higher. The speedup tracks the tool share, as the model says it must. The lowest session (scikit-learn-25973, 11×) is the most tool-heavy.
+- Report it as: the design generalizes to unseen tasks, and its gain grows with how LLM-bound the session is. Don't pool it into the 9.4× headline, since its task mix differs from the stratified sample.
+
 ## Pending
 
-- 11 additional tasks as a second held-out set (running); G2 (GPU past the wall).
+- G2 (GPU past the wall): running.
 
 ## Open questions for the authors
 

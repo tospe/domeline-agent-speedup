@@ -23,7 +23,7 @@ Environment:
 | A2 | Build llama.cpp with CUDA (sm_86) | done (commit e3797b1) |
 | A3 | Download mini-coder-4b, convert to GGUF, quantize Q8_0 (+ Q4_K_M) | done |
 | G1 | llama-bench decode tok/s vs context depth, KV f16/q8_0/q4_0, FA on | done; figures/gpu_wall.pdf |
-| G2 | Past the wall: -nkvo 1 and reduced -ngl; record the step | todo |
+| G2 | Past the wall: -nkvo 1 (KV in host memory); record the step | running (gpu/g2_sweep.sh) |
 | H1 | Integrator v0: model spec, decode op graph(L), tech library, mapping, transfer/launch/α·N, KV writes, capacity | done |
 | H2 | Test: reproduce soc_inference_estimator.py BitNet numbers under its assumptions | done (exact, 6 cases) |
 | H3 | CPU per-op profile of decode ops at mini-coder-4b shapes on this host (C microbenchmark) | done; results/cpu/cpu_ops.tsv |
@@ -33,7 +33,7 @@ Environment:
 | H7 | Search: Domeline-guided walk policy; baselines random, BO, subspace sweep; budgets + decision log | done; exhaustive sweep done (575,400 designs) |
 | H8 | LLM-agent searcher (pluggable backend; claude -p or local llama-server) | done (claude -p, with/without readings) |
 | T1 | mini-swe-agent installed, pointed at llama-server, timing subclass logging per-turn trace schema | done; images pulling |
-| T2 | SWE-bench Verified sessions via podman | 89/100 done; wall sessions re-run with int8 KV; 11 images pulled, run after the sweep (second held-out set) |
+| T2 | SWE-bench Verified sessions via podman | 100/100 done: 89 frozen workload + 11 second held-out; wall sessions re-run with int8 KV |
 | T3 | Retrieval-agent candidate: tool-share measurement on ~5 sessions | todo |
 | F1 | Figures: profile breakdown, GPU wall, co-design walk, sample-efficiency, effort staircase, headline | done on final data: gpu_wall, trace_profile, walk, search, effort, pareto, sensitivity; sweep (final) |
 | R1 | Status report artifact for the user at the end | todo |
@@ -84,3 +84,5 @@ Environment:
 - 11:20 New figure fig_sweep (draft on the partial sweep): (a) survival curve over all feasible designs (8.8% of them beat the 3080; ~0.1% are within 1% of the optimum); (b) speedup vs area for every design with the exhaustive Pareto front, the design each searcher returned on top, and an inset over the top 3%. Re-render when the sweep completes.
 - 18:00 Exhaustive sweep done (575,400 designs, 11.5 h). Optimum 9.48x; the walk's design is the smallest within 1% of it; 96 designs (0.03% of feasible) within 1%, 3.8% beat the GPU (the partial sample over-represented good designs: workers stride through the product in order). Per-cap optimum = effort staircase exactly. fig_sweep and fig_search (reference = exhaustive optimum) re-rendered; legend labels shortened. docs/results.md has the section.
 - 18:05 Froze the workload: traces/workload_main.tsv lists the 89 sessions every search result used; experiments/common.sessions() loads only those by default (which="extra" for later ones), so the 11 new sessions cannot change the search/held-out split. Started the 11 remaining sessions (f16 server, CPU now idle).
+- 18:35 11 late sessions done: 7 Submitted, 4 hit the 32K fp16 wall (36%). Re-ran those 4 with int8 KV at 64K (3 Submitted; sympy-23413 250-step limit). `pkill -f "llama-server .*mini-coder-4b"` again killed its own shell (the pattern matches the command line); use `pkill -x llama-server` from now on.
+- 19:05 Second held-out set: walk design 15.4x (14.1x without the 250-turn sympy-23413), 5-month design 12.1x. These tasks spend less time in tools (tools-only bound 54x vs 17x), so the gain is higher; reported separately, not pooled into the headline. G2 started (KV in host memory, fp16, both weight formats).
