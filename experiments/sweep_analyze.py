@@ -24,9 +24,9 @@ TOL = 0.01          # "best" = smallest design within 1% of the fastest (same ru
 
 
 def load(tag):
-    full = ROOT / "results/search" / f"sweep_{tag}.tsv"
-    if full.exists():
-        return pd.read_csv(full, sep="\t"), False
+    for full in (ROOT / "results/search" / f"sweep_{tag}.tsv", ROOT / "results/search" / f"sweep_{tag}.tsv.gz"):
+        if full.exists():
+            return pd.read_csv(full, sep="\t"), False
     parts = sorted((ROOT / "results/search" / f"sweep_{tag}.parts").glob("part*.tsv"))
     df = pd.concat([pd.read_csv(p, sep="\t", header=None, names=COLS) for p in parts], ignore_index=True)
     return df, True

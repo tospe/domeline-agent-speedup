@@ -30,12 +30,12 @@ Environment:
 | H4 | Trace schema + session replay (synthetic context paths until real traces) | done |
 | H5 | Domeline readings: binding term, headroom, Amdahl bound, GPU sheet | done as the integrator's term breakdown (evaluate.py); Domeline's own chart code not integrated |
 | H6 | Tech + ASIC library seeded from literature (ISAAC, PUMA, STAR, SRAM-CIM ISSCC macros, CAM) | seeded; VERIFY flags open |
-| H7 | Search: Domeline-guided walk policy; baselines random, BO, subspace sweep; budgets + decision log | done; full-workload runs done; exhaustive sweep running (ETA ~17:45) |
+| H7 | Search: Domeline-guided walk policy; baselines random, BO, subspace sweep; budgets + decision log | done; exhaustive sweep done (575,400 designs) |
 | H8 | LLM-agent searcher (pluggable backend; claude -p or local llama-server) | done (claude -p, with/without readings) |
 | T1 | mini-swe-agent installed, pointed at llama-server, timing subclass logging per-turn trace schema | done; images pulling |
 | T2 | SWE-bench Verified sessions via podman | 89/100 done; wall sessions re-run with int8 KV; 11 images pulled, run after the sweep (second held-out set) |
 | T3 | Retrieval-agent candidate: tool-share measurement on ~5 sessions | todo |
-| F1 | Figures: profile breakdown, GPU wall, co-design walk, sample-efficiency, effort staircase, headline | done on final data: gpu_wall, trace_profile, walk, search, effort, pareto, sensitivity; sweep figure drafted (final after sweep) |
+| F1 | Figures: profile breakdown, GPU wall, co-design walk, sample-efficiency, effort staircase, headline | done on final data: gpu_wall, trace_profile, walk, search, effort, pareto, sensitivity; sweep (final) |
 | R1 | Status report artifact for the user at the end | todo |
 
 ## Decisions taken
@@ -82,3 +82,5 @@ Environment:
 - 09:25 Checked ISAAC Table I (PDF): 100 ns read, tile 0.372 mm2 = 96 xbars (0.00388 mm2/xbar; 0.0053 at chip level with I/O), 2 b/cell, 1-b DAC, 32 nm. The ADC is 1.2 GSps, not 1.28 (source string fixed; the model uses the 100 ns read directly, so no numbers change). The two parameters that matter for the headline are now sourced.
 - 10:05 Sweep at 30% (ETA ~18:30). Wrote experiments/sweep_analyze.py and ran it on the partial data (169,852 designs, every 20th-strided so a fair sample): optimum 9.49x; the walk's design (9.42x, 9,729 mm2, 7 mo) is the smallest within 1% of it; only 96 designs are within 1%, 7.3% of feasible designs beat the GPU. The sweep's per-cap optimum reproduces the effort staircase exactly (0.59 / 3.08 / 8.00 / 9.42x). fig_search switches its reference line to the exhaustive optimum once the sweep is complete.
 - 11:20 New figure fig_sweep (draft on the partial sweep): (a) survival curve over all feasible designs (8.8% of them beat the 3080; ~0.1% are within 1% of the optimum); (b) speedup vs area for every design with the exhaustive Pareto front, the design each searcher returned on top, and an inset over the top 3%. Re-render when the sweep completes.
+- 18:00 Exhaustive sweep done (575,400 designs, 11.5 h). Optimum 9.48x; the walk's design is the smallest within 1% of it; 96 designs (0.03% of feasible) within 1%, 3.8% beat the GPU (the partial sample over-represented good designs: workers stride through the product in order). Per-cap optimum = effort staircase exactly. fig_sweep and fig_search (reference = exhaustive optimum) re-rendered; legend labels shortened. docs/results.md has the section.
+- 18:05 Froze the workload: traces/workload_main.tsv lists the 89 sessions every search result used; experiments/common.sessions() loads only those by default (which="extra" for later ones), so the 11 new sessions cannot change the search/held-out split. Started the 11 remaining sessions (f16 server, CPU now idle).

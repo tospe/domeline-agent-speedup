@@ -1,6 +1,6 @@
 """Fig: sample efficiency. Best feasible speedup found vs evaluations used, per search method.
 
-Lines are the median over seeds; bands span min..max. A dashed line marks the
+Lines are the median over seeds; bands span min..max. All classical searchers see time only. A dashed line marks the
 best design any method found, or the exhaustive sweep's optimum once
 experiments/sweep_analyze.py has run on the complete sweep.
 Data: results/search/<tag>.json (experiments/search_compare.py).
@@ -26,7 +26,7 @@ METHODS = [
     ("agent_scalar", "LLM agent, time only"),
     ("tpe", "Bayesian opt. (TPE)"),
     ("random", "Random search"),
-    ("hill_climb", "Hill climbing, time only"),
+    ("hill_climb", "Hill climbing"),
 ]
 
 
@@ -62,7 +62,7 @@ def draw(ax, d, methods, top):
         st = fs.series(SLOT[m])
         med = np.median(curves, axis=0)
         ax.plot(x, med, color=st["color"], linestyle=st["linestyle"], lw=1.4,
-                label=label + (f" (median of {len(runs)})" if len(runs) > 1 else ""), zorder=3)
+                label=label + (f" ({len(runs)} seeds)" if len(runs) > 1 else ""), zorder=3)
         if len(runs) > 1:
             ax.fill_between(x, curves.min(0), curves.max(0), color=st["color"], alpha=0.12, lw=0)
         # Marker where the (median) curve first gets within 1% of the best any method found.

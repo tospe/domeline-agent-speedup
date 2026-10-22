@@ -60,10 +60,29 @@ What this supports:
 
 Base 9.52× on all 89 sessions. Each uncertain number is scaled by ½ and 2, with the walk re-optimizing. Only the **crossbar read cycle** moves the headline much (11.0× / 7.5×). Nonlinear-unit throughput and bandwidth move it by ≤4%. Link, crossbar write latency, vector-unit throughput and the host attention kernel move it by <1%. **Per-array crossbar area moves area linearly (4.9K–19.5K mm²) and leaves speed unchanged.** The VERIFY entries that matter are the read cycle and the per-array area.
 
+## Exhaustive sweep (`experiments/sweep_all.py`, `sweep_analyze.py`, `figs/fig_sweep.py`)
+
+All 575,400 distinct designs on the 45 search sessions (11.5 h on 20 cores). 280,296 are feasible.
+
+- **The optimum under the model is 9.48×.** The walk's design (9.42×, 9,729 mm², 7 months) is the smallest design within 1% of it, which is the rule every searcher's "best" uses.
+- **Good designs are rare.** Only 3.8% of feasible designs beat the 3080. 96 designs (0.03%) are within 1% of the optimum, and 144 are within 10%. Random search's failure follows directly from this.
+- **The effort staircase is exact.** The best design under each effort cap in the sweep matches what the walk found: 0.59 / 3.08 / 8.00 / 9.42×.
+- **How close each searcher got, unconstrained (gap to 9.48×, eval of first design within 1%):**
+  - walk: 0.7% (the smallest-design rule), at eval 20;
+  - TPE: 0.07–0.29%, at evals 41–69;
+  - hill climbing: 0.17% on 2 of 3 seeds, at evals 56–78; 66% on the third;
+  - random: 14–68%, never;
+  - Sonnet agent: 0.18%, at eval 10 with readings and eval 4 without.
+- **Under the 5-month cap (optimum 8.05×):**
+  - walk: 0.56%, at eval 24;
+  - TPE: within 1% on 1 of 3 seeds;
+  - hill climbing: within 1% on 1 of 3 seeds;
+  - Sonnet and Haiku agents: within 1% in 9–15 evals on 9 of 10 runs.
+- Exhaustive search needs 575,400 evaluations to find the optimum. The walk needs 20–30, so this space did not need brute force. The model makes brute force affordable here, but not with a gem5-class evaluator at 1–3 h per point.
+
 ## Pending
 
-- Exhaustive sweep of all 575,400 designs (the true optimum under the model).
-- 11 rate-limited tasks as a second held-out set; G2 (GPU past the wall).
+- 11 additional tasks as a second held-out set (running); G2 (GPU past the wall).
 
 ## Open questions for the authors
 
