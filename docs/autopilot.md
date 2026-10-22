@@ -23,7 +23,7 @@ Environment:
 | A2 | Build llama.cpp with CUDA (sm_86) | done (commit e3797b1) |
 | A3 | Download mini-coder-4b, convert to GGUF, quantize Q8_0 (+ Q4_K_M) | done |
 | G1 | llama-bench decode tok/s vs context depth, KV f16/q8_0/q4_0, FA on | done; figures/gpu_wall.pdf |
-| G2 | Past the wall: -nkvo 1 (KV in host memory); record the step | running (gpu/g2_sweep.sh) |
+| G2 | Past the wall: -nkvo 1 (KV in host memory); record the step | done: 26x cliff past the wall |
 | H1 | Integrator v0: model spec, decode op graph(L), tech library, mapping, transfer/launch/α·N, KV writes, capacity | done |
 | H2 | Test: reproduce soc_inference_estimator.py BitNet numbers under its assumptions | done (exact, 6 cases) |
 | H3 | CPU per-op profile of decode ops at mini-coder-4b shapes on this host (C microbenchmark) | done; results/cpu/cpu_ops.tsv |
@@ -86,3 +86,5 @@ Environment:
 - 18:05 Froze the workload: traces/workload_main.tsv lists the 89 sessions every search result used; experiments/common.sessions() loads only those by default (which="extra" for later ones), so the 11 new sessions cannot change the search/held-out split. Started the 11 remaining sessions (f16 server, CPU now idle).
 - 18:35 11 late sessions done: 7 Submitted, 4 hit the 32K fp16 wall (36%). Re-ran those 4 with int8 KV at 64K (3 Submitted; sympy-23413 250-step limit). `pkill -f "llama-server .*mini-coder-4b"` again killed its own shell (the pattern matches the command line); use `pkill -x llama-server` from now on.
 - 19:05 Second held-out set: walk design 15.4x (14.1x without the 250-turn sympy-23413), 5-month design 12.1x. These tasks spend less time in tools (tools-only bound 54x vs 17x), so the gain is higher; reported separately, not pooled into the headline. G2 started (KV in host memory, fp16, both weight formats).
+- 19:20 G2 done: with fp16 KV in host memory (-nkvo 1) the 3080 decodes at 59 ms/token at 4K, 373 ms at 32K, 1.07 s at 96K (Q8_0; Q4_K_M within 3%). Past the wall the GPU is 26x slower than in VRAM at the same depth: the wall is a cliff, not a slope. gpu_wall figure states these numbers (they are off its scale).
+- 19:25 Area knobs added from ISAAC Table I (via a literature subagent): lean tile (no eDRAM buffer/bus, 47% of a tile, 2 months, assumption), ADCs per IMA 8/4/2 (31% of a tile; read time x8/n), 4-bit cells (half the arrays, 1.27x area per array derived from ISAAC's -21% CE, 1 us write-verify writes, 3 months). Headline design: lean tile keeps 9.42x at 5,833 mm2; lean + 4-bit cells 8.95x at 3,692 mm2. 55% of the headline's arrays hold KV for the one 64K session. Iso-area study running (experiments/area_sweep.py).

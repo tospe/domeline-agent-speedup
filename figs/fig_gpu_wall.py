@@ -60,12 +60,17 @@ def draw(ax, weights, show_ylabel=True):
                         textcoords="offset points", va="center", ha="left", color=fs.INK_2, fontsize=6.5)
         for (kv2, mode), p in g2.items():
             if kv2 == kv:
-                ax.plot([d / 1024 for d, _ in p], [ms for _, ms in p], color=st["color"],
-                        linestyle=":", marker=st["marker"], markerfacecolor="white", zorder=3)
+                # KV in host memory: an order of magnitude off this scale, so it is stated, not drawn.
+                ms = dict(p)
+                at = [d for d in (4096, 32768, 98304) if d in ms]
+                txt = "fp16 KV in host memory (past the wall):\n" + ", ".join(
+                    f"{ms[d]:.0f} ms at {d // 1024}K" for d in at)
+                ax.annotate(txt, (0.03, 0.97), xycoords="axes fraction", va="top", ha="left",
+                            fontsize=6.3, color=fs.INK_2)
     ax.set_xlabel("Context length (K tokens)")
     if show_ylabel:
         ax.set_ylabel("Decode time per token (ms)")
-    ax.set_ylim(0, ymax * 1.12)
+    ax.set_ylim(0, ymax * 1.35)
     ax.set_xlim(0, max(fails.values()) / 1024 * 1.28 if fails else None)
     ax.set_title(f"{weights} weights", loc="left", color=fs.INK_2)
 
@@ -75,7 +80,7 @@ def main():
     fig, axes = plt.subplots(1, 2, figsize=(fs.PAGE_W, 2.1), sharey=True)
     draw(axes[0], "Q8_0")
     draw(axes[1], "Q4_K_M", show_ylabel=False)
-    axes[0].legend(loc="upper left")
+    axes[0].legend(loc="upper left", bbox_to_anchor=(0.0, 0.84))
     print(fs.save(fig, "gpu_wall"))
 
 
