@@ -66,9 +66,14 @@ class Evaluator:
         """No design runs the workload faster than its tools alone."""
         return self.tools_time
 
-    def best(self):
+    def best(self, tol=0.01):
+        """The smallest design within `tol` of the fastest feasible one (same rule for every searcher)."""
         feas = [e for e in self.log if e.feasible]
-        return min(feas, key=lambda e: e.time_s) if feas else None
+        if not feas:
+            return None
+        t_min = min(e.time_s for e in feas)
+        near = [e for e in feas if e.time_s <= t_min * (1 + tol)]
+        return min(near, key=lambda e: (e.area_mm2, e.effort_months, e.time_s))
 
     def __call__(self, point) -> Eval:
         k = key(point)
