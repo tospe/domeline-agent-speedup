@@ -9,11 +9,12 @@
 - name: xbar_isaac
   kind: crossbar
   supports: [mvm_static, mvm_dynamic, kv_append]
-  source: "Shafiee et al., ISAAC, ISCA 2016 (Table: 128x128 xbar, 2 b/cell, 1-b DAC, 8-b ADC @1.28 GS/s shared by 128 cols)"
+  source: "Shafiee et al., ISAAC, ISCA 2016, Table I (checked): 128x128 xbars, 2 b/cell, 1-b DAC, 8-b ADC at 1.2 GSps, 8 xbars and 8 ADCs per IMA, 12 IMAs per tile, tile 0.372 mm2 at 32 nm; 'one cycle, which is the read latency' = 100 ns"
   maturity: simulated
   effort_months: 0
   # Tile 0.372 mm^2 (32 nm) holds 12 IMAs x 8 xbars = 96 xbars, so 0.00388 mm^2 per
-  # xbar with its ADCs, eDRAM and routing amortized in.
+  # xbar with its ADCs, eDRAM and routing amortized in. At chip level (85.4 mm^2 for
+  # 168 tiles, I/O included) it is 0.0053 mm^2.
   area_mm2_per_unit: 0.00388
   params:
     rows: 128
@@ -21,13 +22,13 @@
     bits_per_cell: 2
     input_bits: 8          # int8 activations
     dac_bits: 1            # bit-serial inputs: 8 read cycles per MVM
-    t_read_s: 100e-9       # one read cycle: 128 columns through one 1.28 GS/s ADC
+    t_read_s: 100e-9       # one read cycle: 128 columns through one 1.2 GSps ADC (ISAAC: 100 ns)
     t_add_s: 1e-9          # one level of the partial-sum adder tree
     t_write_row_s: 50.88e-9   # PipeLayer (HPCA 2017) ReRAM write latency, single pulse
     write_parallel_arrays: 1024
     transpose_write: false
     layer_pipelined: true     # ISAAC pipelines across layers
-  notes: "ISAAC does not write at run time; write latency taken from PipeLayer. VERIFY t_write_row_s and whether multi-level cells need write-verify (~10x)."
+  notes: "Read cycle and area checked against ISAAC Table I. ISAAC does not write at run time; write latency from PipeLayer, VERIFY (moves the headline <1%, see sensitivity)."
 
 - name: xbar_isaac_wv
   kind: crossbar
