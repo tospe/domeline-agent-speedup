@@ -1,0 +1,80 @@
+"""Fig: sample efficiency. Best feasible speedup found vs evaluations used, per search method.
+
+Lines are the median over seeds; bands span min..max. A dashed line marks the
+best design any method found (the reference optimum for "within X% of best").
+Data: results/search/<tag>.json (experiments/search_compare.py).
+  python figs/fig_search.py [tag]
+"""
+
+import json
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(ROOT))
+
+import matplotlib.pyplot as plt  # noqa: E402
+import numpy as np  # noqa: E402
+
+from harness import figstyle as fs  # noqa: E402
+
+# Fixed order = fixed color per method across every figure.
+METHODS = [
+    ("walk", "Domeline walk (readings)"),
+    ("agent", "LLM agent + readings"),
+    ("agent_scalar", "LLM agent, time only"),
+    ("tpe", "Bayesian opt. (TPE)"),
+    ("random", "Random search"),
+    ("hill_climb", "Hill climbing, time only"),
+]
+
+
+def best_so_far(log, budget):
+    cur, out = 0.0, []
+    by_n = {e["n"]: e for e in log}
+    for n in range(1, budget + 1):
+        e = by_n.get(n)
+        if e and e["feasible"]:
+            cur = max(cur, e["speedup"])
+        out.append(cur)
+    return np.array(out)
+
+
+def main(tag="main"):
+    d = json.loads((ROOT / "results/search" / f"{tag}.json").read_text())
+    B = d["budget"]
+    fs.apply()
+    fig, ax = plt.subplots(figsize=(fs.COL_W, 2.3))
+    x = np.arange(1, B + 1)
+    top = max((r["best"]["speedup"] for r in d["runs"] if "best" in r), default=1)
+    for i, (m, label) in enumerate(METHODS):
+        runs = [r for r in d["runs"] if r["method"] == m]
+        if not runs:
+            continue
+        curves = np.stack([best_so_far(r["log"], B) for r in runs])
+        # A run that stopped early keeps its best for the rest of the budget.
+        st = fs.series(i)
+        med = np.median(curves, axis=0)
+        ax.plot(x, med, color=st["color"], linestyle=st["linestyle"], lw=1.4, label=label, zorder=3)
+        if len(runs) > 1:
+            ax.fill_between(x, curves.min(0), curves.max(0), color=st["color"], alpha=0.12, lw=0)
+        used = int(np.median([r["evals"] for r in runs]))
+        ax.plot([min(used, B)], [med[min(used, B) - 1]], marker=st["marker"], color=st["color"],
+                markersize=4, zorder=4)
+    ax.axhline(top, color=fs.INK_3, lw=0.7, ls=":")
+    ax.axhline(1.0, color=fs.INK_2, lw=0.7, ls="--")
+    ax.annotate("RTX 3080", (B, 1.0), xytext=(0, -2), textcoords="offset points", ha="right",
+                va="top", fontsize=6.5, color=fs.INK_2)
+    ax.annotate(f"best found {top:.2f}×", (B, top), xytext=(0, 2), textcoords="offset points",
+                ha="right", va="bottom", fontsize=6.5, color=fs.INK_2)
+    ax.set_xlabel("Design evaluations")
+    ax.set_ylabel("Best speedup over RTX 3080")
+    ax.set_xlim(1, B)
+    ax.set_ylim(0, top * 1.15)
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.24), ncol=2, fontsize=6.3,
+              columnspacing=1.0, handlelength=2.0)
+    print(fs.save(fig, f"search_{tag}"))
+
+
+if __name__ == "__main__":
+    main(*(sys.argv[1:] or ["main"]))

@@ -1,0 +1,10 @@
+{
+ "instance_id": "pylint-dev__pylint-8898",
+ "repo": "pylint-dev/pylint",
+ "t_env_setup_s": 0.2849576473236084,
+ "exec_overhead_s": 0.2991027139942162,
+ "exit_status": "Submitted",
+ "session_wall_s": 123.14871716499329,
+ "n_turns": 35,
+ "submission": "diff --git a/pylint/config/argument.py b/pylint/config/argument.py\nindex 30a5fd175..4efeb9a43 100644\n--- a/pylint/config/argument.py\n+++ b/pylint/config/argument.py\n@@ -115,6 +115,9 @@ def _regexp_csv_transfomer(value: str) -> Sequence[Pattern[str]]:\n     \"\"\"Transforms a comma separated list of regular expressions.\"\"\"\n     patterns: list[Pattern[str]] = []\n     for pattern in _csv_transformer(value):\n+        # Escape commas in regex patterns to prevent misinterpretation as separators\n+        # This handles cases where a regex pattern legitimately contains commas\n+        pattern = pattern.replace(\",\", \"\\\\,\")\n         patterns.append(_regex_transformer(pattern))\n     return patterns\n \ndiff --git a/test_config.ini b/test_config.ini\nnew file mode 100644\nindex 000000000..904ce8a4e\n--- /dev/null\n+++ b/test_config.ini\n@@ -0,0 +1,4 @@\n+[tool.pylint.basic]\n+# capture group ensures that the part after the comma is an invalid regular\n+# expression, causing pylint to crash\n+bad-name-rgxs = \"(foo{1,3})\"\ndiff --git a/test_file.py b/test_file.py\nnew file mode 100644\nindex 000000000..c5d726b79\n--- /dev/null\n+++ b/test_file.py\n@@ -0,0 +1,2 @@\n+def hello():\n+    return \"world\"\n"
+}

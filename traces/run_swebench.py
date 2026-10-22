@@ -136,6 +136,8 @@ def main():
     ap.add_argument("--base-url", default="http://127.0.0.1:8080")
     ap.add_argument("--wall-limit-s", type=int, default=2400)
     ap.add_argument("--limit", type=int, default=0)
+    ap.add_argument("--skip-missing-images", action="store_true",
+                    help="skip instances whose image is not pulled yet (Docker Hub rate limits)")
     args = ap.parse_args()
 
     config = yaml.safe_load(Path(args.config).read_text())
@@ -152,10 +154,17 @@ def main():
         sess_dir = out / iid
         if (sess_dir / "result.json").exists():
             continue
-        sess_dir.mkdir(exist_ok=True)
         trace = sess_dir / "trace.jsonl"
-        trace.unlink(missing_ok=True)
         inst = ds[iid]
+        if args.skip_missing_images:
+            import subprocess
+            from minisweagent.run.extra.swebench import get_swebench_docker_image_name
+            img = get_swebench_docker_image_name(inst)
+            if subprocess.run([os.environ["MSWEA_DOCKER_EXECUTABLE"], "image", "exists", img]).returncode:
+                print(f"{iid}: image not present, skipped", flush=True)
+                continue
+        sess_dir.mkdir(exist_ok=True)
+        trace.unlink(missing_ok=True)
         t0 = time.time()
         env = get_sb_environment(config, inst)
         t_env = time.time() - t0

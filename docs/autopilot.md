@@ -35,7 +35,7 @@ Environment:
 | T1 | mini-swe-agent installed, pointed at llama-server, timing subclass logging per-turn trace schema | done; images pulling |
 | T2 | SWE-bench Verified sessions via podman (20) | running |
 | T3 | Retrieval-agent candidate: tool-share measurement on ~5 sessions | todo |
-| F1 | Figures: profile breakdown, GPU wall, co-design walk, sample-efficiency, effort staircase, headline | todo |
+| F1 | Figures: profile breakdown, GPU wall, co-design walk, sample-efficiency, effort staircase, headline | scripts done (gpu_wall, trace_profile, walk, search, effort); final data pending |
 | R1 | Status report artifact for the user at the end | todo |
 
 ## Decisions taken
@@ -67,3 +67,5 @@ Environment:
 - 05:55 First 20-session run: v1 checks step_limit against the model's call count, and the model object was shared, so sessions 9-20 hit LimitsExceeded. Fixed (fresh model per session); re-running those 12. The first 8 are valid: decode 84%, prefill 4%, tools 12% raw / ~4% net of exec overhead; final context median 12K, max 26K, so none reach the 3080's wall.
 - 06:10 Workload replay with shared per-design curves (chunked prefill): worst error 0.22% vs the exact per-turn replay, 6.5x faster, and constant in the number of sessions. G3 cross-check: the G1 curve predicts measured session decode within -2 to -3%.
 - 06:40 Search comparison runs (experiments/search_compare.py). The smoke run exposed two model gaps, both fixed: (1) crossbar prefill now pipelines tokens across layers (ISAAC's inter-layer pipeline; it had been charged per token through all 36 layers); (2) each fixed-function softmax instance has its own buffer bandwidth. The walk also gained the vector->star move. Smoke on 6 search sessions, budget 40: walk 3.97x at eval 23, TPE 3.27x at eval 30, random 1.38x, hill-climb 0.39x.
+- 07:10 20-session set complete: 18 Submitted, 2 ContextExceeded (they hit the 3080's 32K fp16 wall). Docker Hub rate limit stopped the image pulls at 64/80; started the 100-task run on the images present (--skip-missing-images).
+- 07:30 Effort staircase (smoke): walk 0.54x at 0 months (crossbars only), 2.26x at 1 month (vector unit), 4.12x at 4 months (nonlinear unit), 4.48x at 7 months (transposed K writes). TPE finds nothing feasible below 4 months in 100 evals.
