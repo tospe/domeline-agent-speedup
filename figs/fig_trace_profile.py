@@ -21,9 +21,16 @@ from harness import figstyle as fs  # noqa: E402
 TRACE_DIR = ROOT / "results/traces/swebench"
 
 
+KV8_DIR = ROOT / "results/traces/swebench_kv8"
+
+
 def summarize():
     rows = []
     for d in sorted(TRACE_DIR.iterdir()):
+        if not d.is_dir():
+            continue
+        if (KV8_DIR / d.name / "result.json").exists():
+            d = KV8_DIR / d.name
         res, tr = d / "result.json", d / "trace.jsonl"
         if not res.exists() or not tr.exists():
             continue
@@ -39,7 +46,7 @@ def summarize():
             "turns": len(turns), "max_ctx": max(t["ctx_start"] + (t["gen_tokens"] or 0) for t in turns),
             "gen_tokens": sum(t["gen_tokens"] or 0 for t in turns),
             "decode_s": dec, "prefill_s": pre, "tool_s": tool, "tool_raw_s": tool_raw,
-            "exec_overhead_s": ov,
+            "exec_overhead_s": ov, "gpu_kv": "q8_0" if d.parent == KV8_DIR else "f16",
         })
     return rows
 
@@ -62,20 +69,19 @@ def main():
     write_tsv(rows)
     fs.apply()
     rows.sort(key=lambda r: r["decode_s"] + r["prefill_s"] + r["tool_s"])
-    fig, (ax, ax2) = plt.subplots(1, 2, figsize=(fs.PAGE_W, 0.16 * len(rows) + 0.9),
-                                  gridspec_kw={"width_ratios": [2.2, 1]})
-    y = np.arange(len(rows))
+    fig, (ax, ax2) = plt.subplots(1, 2, figsize=(fs.PAGE_W, 2.2), gridspec_kw={"width_ratios": [2.2, 1]})
+    x = np.arange(1, len(rows) + 1)
     parts = [("decode_s", "LLM decode", 0), ("prefill_s", "LLM prefill", 1), ("tool_s", "Tool execution", 2)]
-    left = np.zeros(len(rows))
+    bottom = np.zeros(len(rows))
     for key, label, i in parts:
         v = np.array([r[key] for r in rows])
-        ax.barh(y, v, left=left, height=0.72, color=fs.SERIES[i], label=label,
-                edgecolor=fs.SURFACE, linewidth=0.8, hatch=[None, "////", None][i])
-        left += v
-    ax.set_yticks(y, [f"{r['repo']}-{r['instance'].split('-')[-1]}" for r in rows], fontsize=6)
-    ax.set_xlabel("Session time on the RTX 3080 (s)")
-    ax.grid(axis="y", visible=False)
-    ax.legend(loc="lower right", ncol=1)
+        ax.bar(x, v, bottom=bottom, width=1.0, color=fs.SERIES[i], label=label, linewidth=0)
+        bottom += v
+    ax.set_xlabel("Sessions, sorted by time on the RTX 3080")
+    ax.set_ylabel("Session time (s)")
+    ax.set_xlim(0.5, len(rows) + 0.5)
+    ax.grid(axis="x", visible=False)
+    ax.legend(loc="upper left")
     tot = sum(r["decode_s"] + r["prefill_s"] + r["tool_s"] for r in rows)
     shares = {k: sum(r[k] for r in rows) / tot for k, _, _ in parts}
     ax.set_title(f"{len(rows)} SWE-bench Verified sessions: decode {shares['decode_s']:.0%}, "
@@ -83,13 +89,16 @@ def main():
                  loc="left", color=fs.INK_2)
 
     ctx = np.sort([r["max_ctx"] for r in rows]) / 1024
-    ax2.step(ctx, np.arange(1, len(ctx) + 1) / len(ctx), where="post", color=fs.SERIES[0], lw=1.4)
+    ax2.step(np.concatenate([[0], ctx]), np.arange(0, len(ctx) + 1) / len(ctx), where="post",
+             color=fs.SERIES[0], lw=1.4)
     ax2.axvspan(32, 36, color=fs.SERIES[1], alpha=0.15, lw=0)
-    ax2.annotate("3080 wall\n(Q8_0, fp16 KV)", (36, 0.08), xytext=(3, 0), textcoords="offset points",
-                 fontsize=6.5, color=fs.INK_2, va="bottom")
+    # Measured, not inferred from final context: sessions that ran out of VRAM with fp16 KV.
+    frac = np.mean([r["gpu_kv"] == "q8_0" for r in rows])
+    ax2.annotate(f"3080 wall, fp16 KV\n({frac:.0%} of sessions\nran out of VRAM)", (36, 0.25), xytext=(3, 0),
+                 textcoords="offset points", fontsize=6.5, color=fs.INK_2, va="bottom")
     ax2.set_xlabel("Final context (K tokens)")
     ax2.set_ylabel("Fraction of sessions")
-    ax2.set_xlim(0, max(40, ctx.max() * 1.1))
+    ax2.set_xlim(0, max(40, ctx.max() * 1.05))
     ax2.set_ylim(0, 1.02)
     print(fs.save(fig, "trace_profile"))
     print({k: round(v, 3) for k, v in shares.items()}, "max ctx", ctx.max(), "median", np.median(ctx))
