@@ -56,9 +56,9 @@ What this supports:
 
 0 months 0.59× (crossbars only) → 1 month 3.07× (vector unit) → 4 months 8.00× (nonlinear unit) → 7 months 9.42× (transposed K writes). TPE finds nothing feasible below 4 months in 150 evaluations.
 
-## Sensitivity (smoke workload; full-workload run pending)
+## Sensitivity (`experiments/sensitivity.py`, `figs/fig_sensitivity.py`)
 
-Only the crossbar read cycle moves speed noticeably (0.5×: +10%, 2×: −15%). Per-array area moves area linearly. Write latency, unit throughput and bandwidth, link, and host attention each move speed by ≤3%.
+Base 9.52× on all 89 sessions. Each uncertain number is scaled by ½ and 2, with the walk re-optimizing. Only the **crossbar read cycle** moves the headline much (11.0× / 7.5×). Nonlinear-unit throughput and bandwidth move it by ≤4%. Link, crossbar write latency, vector-unit throughput and the host attention kernel move it by <1%. **Per-array crossbar area moves area linearly (4.9K–19.5K mm²) and leaves speed unchanged.** The VERIFY entries that matter are the read cycle and the per-array area.
 
 ## Pending
 
