@@ -23,10 +23,22 @@ def library():
     return load_library(ROOT / "lib/tech")
 
 
+KV8_DIR = ROOT / "results/traces/swebench_kv8"
+
+
 def sessions(trace_dir=TRACE_DIR, ok_only=True):
-    """Real sessions with turns, podman exec overhead removed from tool times."""
+    """Real sessions with turns, podman exec overhead removed from tool times.
+
+    A session that hit the 3080's fp16 KV wall is taken from its int8-KV re-run
+    (results/traces/swebench_kv8) when one exists, so it is complete; its GPU
+    times are then those of the configuration the GPU had to use.
+    """
     out = []
     for d in sorted(Path(trace_dir).iterdir()):
+        if not d.is_dir():
+            continue
+        if (KV8_DIR / d.name / "result.json").exists():
+            d = KV8_DIR / d.name
         res, tr = d / "result.json", d / "trace.jsonl"
         if not (res.exists() and tr.exists()):
             continue
@@ -35,7 +47,8 @@ def sessions(trace_dir=TRACE_DIR, ok_only=True):
             continue
         s = load_trace(tr, name=d.name, exec_overhead_s=r.get("exec_overhead_s", 0.0))
         if s.turns:
-            s.meta = {"repo": r["repo"], "exit": r["exit_status"]}
+            s.meta = {"repo": r["repo"], "exit": r["exit_status"],
+                      "gpu_kv": "q8_0" if d.parent == KV8_DIR else "f16"}
             out.append(s)
     return out
 
