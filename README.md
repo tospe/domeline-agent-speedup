@@ -23,7 +23,7 @@ Design notes: `docs/harness.md`. Run log, decisions and status: `docs/autopilot.
 | `gpu/g1_sweep.sh` | RTX 3080 decode time vs context and KV precision (llama-bench) |
 | `profile/cpu_ops.c` | Host CPU per-op profile at mini-coder-4b shapes |
 | `traces/run_swebench.py` | Agent runner that logs per-turn traces (context, prefill/decode times, tool times) |
-| `experiments/` | Search comparison, effort staircase, sensitivity, exhaustive sweep |
+| `experiments/` | Search comparison, effort staircase, sensitivity, exhaustive sweep and its analysis |
 | `figs/` | One script per figure; figures land in `figures/` |
 | `tests/` | Reproduction of TERINT-GEMV's estimator; fast replay vs exact replay |
 
@@ -41,6 +41,7 @@ cd experiments
 python search_compare.py --budget 100 --seeds 0 1 2 --tag main
 python effort_sweep.py --tag main
 python sensitivity.py --tag main
-python sweep_all.py --workers 20 --tag main       # all 575,400 designs, ~4 h on 20 cores
+python sweep_all.py --workers 20 --tag main       # all 575,400 designs, ~11 h on 20 cores
+python sweep_analyze.py --tag main --runs main effort5 effort5_haiku
 cd .. && for f in figs/fig_*.py; do python $f main; done
 ```

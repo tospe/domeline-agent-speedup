@@ -28,14 +28,14 @@ Environment:
 | H2 | Test: reproduce soc_inference_estimator.py BitNet numbers under its assumptions | done (exact, 6 cases) |
 | H3 | CPU per-op profile of decode ops at mini-coder-4b shapes on this host (C microbenchmark) | done; results/cpu/cpu_ops.tsv |
 | H4 | Trace schema + session replay (synthetic context paths until real traces) | done |
-| H5 | Domeline readings: binding term, headroom, Amdahl bound, GPU sheet | todo |
+| H5 | Domeline readings: binding term, headroom, Amdahl bound, GPU sheet | done as the integrator's term breakdown (evaluate.py); Domeline's own chart code not integrated |
 | H6 | Tech + ASIC library seeded from literature (ISAAC, PUMA, STAR, SRAM-CIM ISSCC macros, CAM) | seeded; VERIFY flags open |
-| H7 | Search: Domeline-guided walk policy; baselines random, BO, subspace sweep; budgets + decision log | done (code); runs need real traces |
+| H7 | Search: Domeline-guided walk policy; baselines random, BO, subspace sweep; budgets + decision log | done; full-workload runs done; exhaustive sweep running (ETA ~17:45) |
 | H8 | LLM-agent searcher (pluggable backend; claude -p or local llama-server) | done (claude -p, with/without readings) |
 | T1 | mini-swe-agent installed, pointed at llama-server, timing subclass logging per-turn trace schema | done; images pulling |
-| T2 | SWE-bench Verified sessions via podman | 89/100 done (11 wait on Docker Hub rate limit); wall sessions re-run with int8 KV |
+| T2 | SWE-bench Verified sessions via podman | 89/100 done; wall sessions re-run with int8 KV; 11 images pulled, run after the sweep (second held-out set) |
 | T3 | Retrieval-agent candidate: tool-share measurement on ~5 sessions | todo |
-| F1 | Figures: profile breakdown, GPU wall, co-design walk, sample-efficiency, effort staircase, headline | scripts done (gpu_wall, trace_profile, walk, search, effort); final data pending |
+| F1 | Figures: profile breakdown, GPU wall, co-design walk, sample-efficiency, effort staircase, headline | done on final data: gpu_wall, trace_profile, walk, search, effort, pareto, sensitivity; sweep figure drafted (final after sweep) |
 | R1 | Status report artifact for the user at the end | todo |
 
 ## Decisions taken
