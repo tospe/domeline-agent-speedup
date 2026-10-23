@@ -57,3 +57,27 @@ Agentic sessions spend 90% of their time decoding one token at a time over a con
 7. Effort staircase (`effort_main`).
 8. Area: speedup vs area with the exact front and the walk under each cap (`area_main`). This is also the strongest walk-vs-TPE result: under area caps TPE misses by up to 14×.
 9. Sensitivity tornado (`sensitivity_main`).
+
+## Limitations to state up front (threats to validity)
+
+1. **Model, not silicon.** Every coprocessor number comes from the integrator. The parts that are validated are UPMEM (VIPER), the TERINT estimator (exact) and the GPU replay (within 3%). The final design has not been simulated in gem5.
+2. **Inputs that set the result:**
+   - The crossbar read cycle (100 ns, ISAAC Table I, checked) sets the headline: 7.5–11.0× over ½–2×.
+   - The 4-bit-cell area factor (1.27×, derived from ISAAC Sec. VII) sets the area front: one front step per +25%.
+   - Per-array area scales area linearly.
+   - Everything else moves the result by less than 4%.
+3. **Assumptions without a direct source:**
+   - lean-tile effort (2 months) and its activation path without the eDRAM buffer;
+   - transposable-write area (+15%);
+   - write-verify latency for 4-bit cells (1 µs);
+   - link presets;
+   - the effort months in general.
+4. **ISAAC is 32 nm and simulated.** Its cell area is about 16× smaller than measured 12 nm ReRAM (ISSCC 2024), though arrays stay under ~10% of a tile even at the measured size. No ReRAM exists in silicon below 12 nm.
+5. **Workload:**
+   - one model (mini-coder-4b, Q8_0), one agent harness and one benchmark (SWE-bench Verified, 100 sessions);
+   - tool times measured with rootless podman on this host;
+   - batch-1 decode, which is the right regime for a personal coding agent but not for a server.
+6. **GPU baseline:** a consumer 3080 running llama.cpp with flash attention. Its measured walls and the past-the-wall cliff are real. A larger GPU (4090/H100) would move the bar by its bandwidth ratio (~1.3–4.4×), and the paper should say so.
+7. **Search comparison:**
+   - the space is 575,400 designs, small enough to sweep exhaustively. That is a strength for validation, but means the "not brute force" claim rests on evaluator cost (gem5), not on the size of the space;
+   - LLM-agent results are 2–3 seeds per setting.
