@@ -13,6 +13,7 @@ Backend: the `claude` CLI in headless mode (no tools, structured output).
 import json
 import math
 import subprocess
+import time
 from dataclasses import dataclass, field
 from typing import List
 
@@ -125,9 +126,13 @@ def call_claude(prompt, model="sonnet", schema=None, timeout=300):
            "--system-prompt", SYSTEM, "--tools", "", "--no-session-persistence"]
     if schema:
         cmd += ["--json-schema", json.dumps(schema)]
-    r = subprocess.run(cmd, input=prompt, capture_output=True, text=True, timeout=timeout, cwd="/tmp")
-    if r.returncode != 0:
-        raise RuntimeError(f"claude failed: {r.stderr[:500]}")
+    for attempt in range(4):           # transient CLI/API failures: back off and retry
+        r = subprocess.run(cmd, input=prompt, capture_output=True, text=True, timeout=timeout, cwd="/tmp")
+        if r.returncode == 0:
+            break
+        time.sleep(30 * (attempt + 1))
+    else:
+        raise RuntimeError(f"claude failed: {r.stderr[:300]} {r.stdout[-300:]}")
     d = json.loads(r.stdout)
     out = d.get("structured_output")
     if out is None:

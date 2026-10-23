@@ -57,6 +57,8 @@ def main():
            "caps": caps, "runs": [], "agent_cost_usd": 0.0}
     print(f"search set {len(train)} sessions, held-out {len(test)}; ref_ctx {ref_ctx}")
 
+    dst = ROOT / "results/search" / f"{args.tag}.json"
+    dst.parent.mkdir(parents=True, exist_ok=True)
     for method in args.methods:
         seeds = [0] if method == "walk" else (
             list(range(args.agent_seeds)) if method.startswith("agent") else args.seeds)
@@ -93,13 +95,12 @@ def main():
                                "area_mm2": best.area_mm2, "effort_months": best.effort_months,
                                "heldout": heldout(space, test, g, best.point, caps)}
             out["runs"].append(rec)
+            dst.write_text(json.dumps(out, indent=1))      # incremental: a crash keeps finished runs
             b = rec.get("best", {})
             print(f"{method:12s} seed {seed}: {ev.used:3d} evals, best {b.get('speedup', float('nan')):.2f}x "
                   f"at eval {b.get('n')}, held-out {b.get('heldout', {}).get('speedup', float('nan')):.2f}x "
                   f"({rec['wall_s']:.0f}s)", flush=True)
 
-    dst = ROOT / "results/search" / f"{args.tag}.json"
-    dst.parent.mkdir(parents=True, exist_ok=True)
     dst.write_text(json.dumps(out, indent=1))
     print(dst, f"agent cost ${out['agent_cost_usd']:.2f}")
 
