@@ -146,6 +146,18 @@ The conclusion holds in the constrained space too:
 - Sonnet does not need them: its priors plus the knob descriptions are enough;
 - the walk is the only algorithmic searcher that is reliable across all four settings (unconstrained, effort cap, area cap, effort staircase).
 
+## Stronger GPUs, scaled (`experiments/gpu_scale.py`)
+
+Not measured. Each session's measured 3080 time is split into decode, prefill and tools. Decode is scaled by the memory-bandwidth ratio and prefill by the dense fp16 tensor-throughput ratio; tools are unchanged. Vendor peaks (VERIFY): 3080 760 GB/s / 59.5 TF, 4090 1,008 GB/s / 165 TF, H100 SXM 3,350 GB/s / 989 TF. This is generous to the bigger GPUs: it assumes the same fraction of peak and no VRAM wall.
+
+| Session set | vs 3080 | vs 4090 | vs H100 SXM |
+|---|---|---|---|
+| Search (45) | 9.42× | 7.10× | 2.52× |
+| Held-out (44) | 9.61× | 7.24× | 2.54× |
+| Late held-out (11) | 15.4× | 11.5× | 3.62× |
+
+The design still beats a data-center H100 by 2.5× on session time. The H100 bound is close to its Amdahl ceiling because tools are 6% of 3080 time and the H100 shrinks decode 4.4×.
+
 ## Open questions for the authors
 
 - **Area** is the weak point: ~15× the 3080's die at ISAAC 32 nm. Denser cells, larger arrays and node scaling are knobs worth adding with sourced numbers.

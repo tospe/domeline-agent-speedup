@@ -36,7 +36,7 @@ Agentic sessions spend 90% of their time decoding one token at a time over a con
 | "The chip is 15× a GPU die." | The area figure: with sourced knobs (lean tile, 4-bit cells, ADC sharing) 9.0× costs 3,700 mm² and 5.1× costs 2,500 mm². The arrays are <1% of a tile; ADCs and buffers are the area. A GPU cannot trade area for single-session latency, but this design can, and the front is that trade. | Node scaling (22/12 nm ReRAM exists in silicon) with a sourced ADC-area rule; a KV tier for the rare >32K sessions. |
 | "Analytical model, not silicon." | Validated pieces (UPMEM, TERINT, GPU replay); sensitivity shows which inputs matter. | gem5 spot checks of the final design (Domeline's own pipeline). |
 | "ISAAC numbers are 2016, 32 nm." | They are the conservative case. Newer macros are denser. | Literature table from ISSCC/VLSI ReRAM CIM macros (agent collecting). |
-| "Why not just a better GPU / quantization?" | The 3080 runs Q8_0 like the design does; its int8/int4 KV walls are measured. | Add a stronger GPU point (e.g. 4090 from published bandwidth, or a measured one) as a sanity bar. |
+| "Why not just a better GPU / quantization?" | The 3080 runs Q8_0 like the design does; its int8/int4 KV walls are measured. | Done, scaled from vendor peaks (`gpu_scale.py`): 7.1× vs a 4090 and 2.5× vs an H100 SXM on the search sessions, generous to the GPUs (same efficiency, no VRAM wall). A measured 4090 point would still help. |
 | "An LLM agent did as well, so why readings?" | True, including under an area cap (Sonnet: 7.20× in 8 evals without readings). The readings make a deterministic, free, explainable searcher as reliable as the agent. Without them, the same moves (hill climbing) fail at 0.04×, and TPE fails on 2 of 3 seeds. Pitch: Domeline readings let a 50-line policy match an LLM, and every move comes with a reason. | Done: Haiku finds it equally fast either way, but stops ~40% sooner with readings; the 4B model is helped a little (2/3 vs 0/3 runs beat the GPU) but is far from the optimum. |
 | "One workload." | 100 SWE-bench Verified sessions, held-out sets, repo-stratified. | Second agentic workload (retrieval/web agent, T3), even if small. |
 
@@ -77,7 +77,7 @@ Agentic sessions spend 90% of their time decoding one token at a time over a con
    - one model (mini-coder-4b, Q8_0), one agent harness and one benchmark (SWE-bench Verified, 100 sessions);
    - tool times measured with rootless podman on this host;
    - batch-1 decode, which is the right regime for a personal coding agent but not for a server.
-6. **GPU baseline:** a consumer 3080 running llama.cpp with flash attention. Its measured walls and the past-the-wall cliff are real. A larger GPU (4090/H100) would move the bar by its bandwidth ratio (~1.3–4.4×), and the paper should say so.
+6. **GPU baseline:** a consumer 3080 running llama.cpp with flash attention. Its measured walls and the past-the-wall cliff are real. Scaled from vendor peaks, the design is 7.1× faster than a 4090 and 2.5× faster than an H100 SXM (`gpu_scale.py`); the paper should show this bar.
 7. **Search comparison:**
    - the space is 575,400 designs, small enough to sweep exhaustively. That is a strength for validation, but means the "not brute force" claim rests on evaluator cost (gem5), not on the size of the space;
    - LLM-agent results are 2–3 seeds per setting.
