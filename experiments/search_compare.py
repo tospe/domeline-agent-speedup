@@ -82,7 +82,7 @@ def main():
             elif method == "tpe":
                 tpe_search(ev, seed=seed)
             elif method in ("agent", "agent_scalar"):
-                run = agent_search(ev, with_readings=(method == "agent"), model=args.agent_model)
+                run = agent_search(ev, with_readings=(method == "agent"), model=args.agent_model, seed=seed)
                 out["agent_cost_usd"] += run.cost_usd
                 extra = {"stop": run.stop, "cost_usd": run.cost_usd, "steps": run.steps}
             best = ev.best()

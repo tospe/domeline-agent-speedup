@@ -142,14 +142,35 @@ def call_claude(prompt, model="sonnet", schema=None, timeout=300):
     return out, d.get("total_cost_usd", 0.0)
 
 
-def agent_search(ev, with_readings=True, model="sonnet", max_repeats=3):
+LOCAL_URL = "http://127.0.0.1:8080/v1/chat/completions"
+
+
+def call_local(prompt, schema=None, seed=0, timeout=600):
+    """Same contract as call_claude, against a local llama-server (grammar-constrained JSON)."""
+    import urllib.request
+    body = {"messages": [{"role": "system", "content": SYSTEM}, {"role": "user", "content": prompt}],
+            "temperature": 0.7, "seed": seed, "max_tokens": 1024}
+    if schema:
+        body["response_format"] = {"type": "json_schema", "json_schema": {"schema": schema}}
+    req = urllib.request.Request(LOCAL_URL, data=json.dumps(body).encode(), headers={"Content-Type": "application/json"})
+    with urllib.request.urlopen(req, timeout=timeout) as r:
+        txt = json.loads(r.read())["choices"][0]["message"]["content"]
+    txt = txt[txt.find("{"): txt.rfind("}") + 1]
+    return json.loads(txt), 0.0
+
+
+def agent_search(ev, with_readings=True, model="sonnet", max_repeats=3, seed=0):
     run = AgentRun()
     history = []
     try:
         history.append(ev(START))
         repeats = 0
         while True:
-            out, cost = call_claude(_prompt(ev, with_readings, history), model=model, schema=_schema())
+            prompt = _prompt(ev, with_readings, history)
+            if model == "local":
+                out, cost = call_local(prompt, schema=_schema(), seed=seed * 1000 + ev.used)
+            else:
+                out, cost = call_claude(prompt, model=model, schema=_schema())
             run.cost_usd += cost
             if out.get("stop"):
                 run.stop = "agent stopped: " + out.get("reasoning", "")[:200]
