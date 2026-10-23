@@ -89,9 +89,41 @@ These are 11 SWE-bench tasks that Docker Hub rate limits blocked during collecti
 - These sessions spend less time in tools, so the tools-only bound is 54× vs 17×, and the speedup is higher. The speedup tracks the tool share, as the model says it must. The lowest session (scikit-learn-25973, 11×) is the most tool-heavy.
 - Report it as: the design generalizes to unseen tasks, and its gain grows with how LLM-bound the session is. Don't pool it into the 9.4× headline, since its task mix differs from the stratified sample.
 
+## GPU past the wall (G2, `gpu/g2_sweep.sh`)
+
+With fp16 KV kept in host memory (`-nkvo 1`), the 3080 decodes at 59 ms/token at 4K, 373 ms at 32K and 1.07 s at 96K (Q8_0; Q4_K_M within 3%). Past the wall it is **26× slower** than in VRAM at the same depth: the wall is a cliff, not a slope.
+
+## Area (`experiments/area_sweep.py`, `figs/fig_area.py`)
+
+Where the area goes, from ISAAC Table I: the arrays are under 1% of a tile; ADCs are 31% and the eDRAM buffer plus its bus 47%. In the headline design, 55% of the arrays hold KV sized for the longest (64K) session.
+
+Three sourced area knobs:
+- a lean tile without the eDRAM buffer and bus (2 months, assumption);
+- 8, 4 or 2 ADCs per IMA (reads 1×, 2× or 4× longer);
+- 4-bit cells (half the arrays, 1.27× area per array, 1 µs write-verify writes, 3 months).
+
+Exact front over the crossbar subspace (3,456 designs):
+
+| Area | Speedup | What it takes |
+|---|---|---|
+| 9,729 mm² | 9.42× | headline (ISAAC tile) |
+| 5,833 mm² | 9.47× | lean tile |
+| 3,692 mm² | 9.00× | + 4-bit cells |
+| 2,872 mm² | 7.19× | + 4 ADCs per IMA |
+| 2,461 mm² | 5.13× | + 2 ADCs per IMA |
+| 1,613 mm² | 1.78× | + no transposed K writes |
+| < 1,600 mm² | — | a 64K context does not fit in crossbars |
+
+Under each area cap (10 caps, full space, budget 150):
+- **Walk:** within 0.6% of the exact front at every cap, in 31–90 evaluations.
+- **TPE:** matches it only at caps ≥ 6,000 mm². Below that it returns 7.79× (5,000 mm² cap), 0.63× (4,000), 1.97× (3,000), and 0.63× (2,500 and 2,000), against 9.00, 9.00, 7.19, 5.13 and 1.78× available.
+- **Walk fix needed:** the first version of the walk failed under caps (0.04×). It rejected every speed move that broke the cap. The fix reads the area term like any other binding term: a faster move that breaks the cap is paid for with the area move that costs least time (lean tile, 4-bit cells, fewer ADCs, fewer spare arrays, int8 KV). The moves it pays with are logged with the step.
+
+How to present it: a GPU cannot buy single-session latency with area, because decode at batch 1 is bound by memory bandwidth and a second GPU does not halve it. A crossbar coprocessor can, and the front is that trade. Iso-area with the 3080 die (628 mm²) is out of reach at ISAAC's 32 nm for a full 64K context. The 22 nm and 12 nm ReRAM silicon (ISSCC 2019–2024) is where the next factor comes from (future work, not modeled).
+
 ## Pending
 
-- G2 (GPU past the wall): running.
+- Nothing running.
 
 ## Open questions for the authors
 

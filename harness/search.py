@@ -181,6 +181,11 @@ def domeline_walk(ev, start=START, tol=0.005, stop_frac=0.02, shrink=True, shrin
             moved = False
             for why, q in proposals(cur):
                 e = ev(q)
+                if not e.feasible and e.wall_ctx is None and e.time_s < cur.time_s * (1 - tol):
+                    # Faster but over the area cap: pay for it with the area reading's moves.
+                    e, paid = _repair_area(ev, e)
+                    if paid:
+                        why += "; area paid by " + paid
                 if better(e, cur, tol):
                     trail.steps.append(WalkStep(why, _diff(cur.point, e.point), e))
                     cur, moved = e, True
@@ -193,6 +198,36 @@ def domeline_walk(ev, start=START, tol=0.005, stop_frac=0.02, shrink=True, shrin
     except BudgetExhausted:
         trail.stop = "budget exhausted"
     return trail
+
+
+AREA_MOVES = (("xbar_tile", "lean"), ("cell_bits", 4), ("adc_per_ima", +1), ("xbar_scale", -1), ("kv_bits", +1))
+
+
+def _repair_area(ev, e, max_steps=6):
+    """Greedy repair of an area-infeasible design: apply the area move that costs least time.
+
+    Each step tries every move that cuts area and keeps the one with the lowest
+    time; stops once the design fits. Returns (eval, description of the moves).
+    """
+    paid = []
+    for _ in range(max_steps):
+        if e.feasible or "area" not in e.reason:
+            break
+        cands = []
+        for knob, v in AREA_MOVES:
+            if knob in ACTIVE_IF and not ACTIVE_IF[knob](e.point):
+                continue
+            q = step_knob(e.point, knob, v) if isinstance(v, int) and knob != "cell_bits" else {**e.point, knob: v}
+            if q is None or key(q) == key(e.point):
+                continue
+            r = ev(q)
+            if r.area_mm2 < e.area_mm2 - 1e-9 and r.wall_ctx is None:
+                cands.append((not r.feasible, r.time_s, knob, r))
+        if not cands:
+            break
+        _, _, knob, e = min(cands, key=lambda c: (c[0], c[1]))
+        paid.append(f"{knob}={_fmt(e.point[knob])}")
+    return e, ", ".join(paid)
 
 
 def _shrink(ev, cur, trail, tol):
