@@ -57,6 +57,7 @@ Agentic sessions spend 90% of their time decoding one token at a time over a con
 7. Effort staircase (`effort_main`).
 8. Area: speedup vs area with the exact front and the walk under each cap (`area_main`). This is also the strongest walk-vs-TPE result: under area caps TPE misses by up to 14×.
 9. Sensitivity tornado (`sensitivity_main`).
+10. Stronger GPUs: the design vs the 3080 (measured) and a 4090 / H100 SXM (scaled), per session set (`gpus`).
 
 ## Limitations to state up front (threats to validity)
 

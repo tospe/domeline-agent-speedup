@@ -146,7 +146,7 @@ The conclusion holds in the constrained space too:
 - Sonnet does not need them: its priors plus the knob descriptions are enough;
 - the walk is the only algorithmic searcher that is reliable across all four settings (unconstrained, effort cap, area cap, effort staircase).
 
-## Stronger GPUs, scaled (`experiments/gpu_scale.py`)
+## Stronger GPUs, scaled (`experiments/gpu_scale.py`, `figs/fig_gpus.py`)
 
 Not measured. Each session's measured 3080 time is split into decode, prefill and tools. Decode is scaled by the memory-bandwidth ratio and prefill by the dense fp16 tensor-throughput ratio; tools are unchanged. Vendor peaks (VERIFY): 3080 760 GB/s / 59.5 TF, 4090 1,008 GB/s / 165 TF, H100 SXM 3,350 GB/s / 989 TF. This is generous to the bigger GPUs: it assumes the same fraction of peak and no VRAM wall.
 

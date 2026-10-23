@@ -46,5 +46,6 @@ python sweep_analyze.py --tag main --runs main effort5 effort5_haiku
 python area_sweep.py --budget 150 --workers 20 --tag main
 python search_compare.py --budget 100 --seeds 0 1 2 --agent-seeds 2 --area-cap 3000 --tag area3000
 python heldout_extra.py --runs main effort5
+python gpu_scale.py                               # 4090 / H100 bar, scaled from the 3080
 cd .. && for f in figs/fig_*.py; do python $f main; done; python figs/fig_search.py effort5; python figs/fig_search.py area3000
 ```
