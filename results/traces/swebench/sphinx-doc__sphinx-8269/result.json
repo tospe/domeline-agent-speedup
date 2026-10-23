@@ -1,0 +1,10 @@
+{
+ "instance_id": "sphinx-doc__sphinx-8269",
+ "repo": "sphinx-doc/sphinx",
+ "t_env_setup_s": 0.2505917549133301,
+ "exec_overhead_s": 0.27335115300957114,
+ "exit_status": "Submitted",
+ "session_wall_s": 35.01381516456604,
+ "n_turns": 23,
+ "submission": "diff --git a/sphinx/builders/linkcheck.py b/sphinx/builders/linkcheck.py\nindex 9b54afc7c..62fe788c4 100644\n--- a/sphinx/builders/linkcheck.py\n+++ b/sphinx/builders/linkcheck.py\n@@ -169,7 +169,11 @@ class CheckExternalLinksBuilder(Builder):\n                     found = check_anchor(response, unquote(anchor))\n \n                     if not found:\n-                        raise Exception(__(\"Anchor '%s' not found\") % anchor)\n+                        # Check if we got an HTTP error instead of just \"anchor not found\"\n+                        if hasattr(response, \"status_code\") and response.status_code >= 400:\n+                            return \"broken\", str(response), 0\n+                        else:\n+                            raise Exception(__(\"Anchor '%s' not found\") % anchor)\n                 else:\n                     try:\n                         # try a HEAD request first, which should be easier on\n"
+}
