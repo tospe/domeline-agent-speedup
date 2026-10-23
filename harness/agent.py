@@ -89,7 +89,7 @@ def _describe(e, with_readings):
     return line
 
 
-def _prompt(ev, with_readings, history):
+def _prompt(ev, with_readings, history, repeated=None):
     knobs = "\n".join(f"- {k}: {[_str(o) for o in v]} — {KNOB_HELP[k]}" for k, v in KNOBS.items())
     hist = "\n".join(_describe(e, with_readings) for e in history) or "(none yet)"
     left = ev.budget - ev.used
@@ -108,7 +108,10 @@ def _prompt(ev, with_readings, history):
                      if with_readings else "Each result gives only the workload time, area, effort and feasibility.")
     return (f"{goal}\n\nKnobs (choose one option each):\n{knobs}\n\nStart design: "
             f"{json.dumps({k: _str(v) for k, v in START.items()})}\n\n{readings_note}\n\n"
-            f"Evaluations so far:\n{hist}\n\nBudget left: {left} evaluations. Propose the next design "
+            f"Evaluations so far:\n{hist}\n\n"
+            + (f"Your last proposal was already evaluated as #{repeated}; propose a design that differs from "
+               "every evaluated one.\n\n" if repeated else "")
+            + f"Budget left: {left} evaluations. Propose the next design "
             "(a point not evaluated yet), with 1-3 sentences of reasoning. Set stop=true only if you are "
             "confident no remaining design is meaningfully better.")
 
@@ -159,16 +162,16 @@ def call_local(prompt, schema=None, seed=0, timeout=600):
     return json.loads(txt), 0.0
 
 
-def agent_search(ev, with_readings=True, model="sonnet", max_repeats=3, seed=0):
+def agent_search(ev, with_readings=True, model="sonnet", max_repeats=5, seed=0):
     run = AgentRun()
     history = []
     try:
         history.append(ev(START))
-        repeats = 0
+        repeats, repeated = 0, None
         while True:
-            prompt = _prompt(ev, with_readings, history)
+            prompt = _prompt(ev, with_readings, history, repeated)
             if model == "local":
-                out, cost = call_local(prompt, schema=_schema(), seed=seed * 1000 + ev.used)
+                out, cost = call_local(prompt, schema=_schema(), seed=seed * 1000 + ev.used * 10 + repeats)
             else:
                 out, cost = call_claude(prompt, model=model, schema=_schema())
             run.cost_usd += cost
@@ -182,11 +185,12 @@ def agent_search(ev, with_readings=True, model="sonnet", max_repeats=3, seed=0):
                               "feasible": e.feasible, "new": ev.used > before})
             if ev.used == before:          # proposed a design already evaluated
                 repeats += 1
+                repeated = e.n
                 if repeats >= max_repeats:
                     run.stop = "agent repeated evaluated designs"
                     break
                 continue
-            repeats = 0
+            repeats, repeated = 0, None
             history.append(e)
     except BudgetExhausted:
         run.stop = "budget exhausted"

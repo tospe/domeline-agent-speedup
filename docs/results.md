@@ -140,3 +140,14 @@ The conclusion holds in the constrained space too:
 - **Area** is the weak point: ~15× the 3080's die at ISAAC 32 nm. Denser cells, larger arrays and node scaling are knobs worth adding with sourced numbers.
 - **Domeline's own chart:** the readings here are the integrator's term breakdown. The Domeline plotting code (floor, surfaces, sheets) should replace or overlay them.
 - **VERIFY entries** in `lib/tech` (PipeLayer write latency, PUMA VFU width, STAR throughput, link presets, UPMEM bank bandwidth) need checking against the papers.
+
+## A weak agent: mini-coder-4b as the designer (`--agent-model local`)
+
+The workload's own 4B model, served by llama-server with grammar-constrained JSON (budget 100, 3 seeds each). It is weak: it stops or repeats itself after 2–16 evaluations.
+
+| | with readings | time only |
+|---|---|---|
+| Unconstrained (optimum 9.48×) | 1.75 / 1.32 / 0.45× | 0.06 / 0.60 / 0.04× |
+| Area ≤ 3,000 mm² (optimum 7.20×) | 0.06 / 0.06 / 0.43× | 0.05 / 0.06 / 0.08× |
+
+With readings, 2 of 3 unconstrained runs beat the GPU, against 0 of 3 without. It is the only setting where the readings measurably help an LLM, but n = 3 and the model is far from the optimum either way. At most, report it as suggestive: the readings help a weak agent get past the first offload decisions and do not make it a good designer.
