@@ -20,7 +20,7 @@ Agentic sessions spend 90% of their time decoding one token at a time over a con
    - It is not brute force. The walk reaches the optimum's 1% band in 20 evaluations; the exhaustive sweep needs 575,400. With a gem5-class evaluator (1–3 h per point) the sweep would cost 66–200 CPU-years, and the walk costs one day.
    - It is reliable. The same single-knob moves without readings (hill climbing) fail on 1 of 3 seeds unconstrained and 2 of 3 under an effort cap. TPE needs 2–3× more evaluations and fails under the cap. Random search fails because only 3.8% of designs beat the GPU and 0.03% are within 1% of the optimum.
    - It is explainable. Every move cites the reading that justified it (walk figure). An LLM agent finds the optimum as fast, but gives no such account. That is a different selling point, and we state it plainly.
-   - It handles constraints. Under area caps the walk lands within 0.6% of the exact front at every cap; TPE with 150 evaluations misses by 1.2–8× at caps of 5,000 mm² and below.
+   - It handles constraints. Under area caps the walk lands within 0.6% of the exact front at every cap; TPE with 150 evaluations misses by 1.2–14× at caps of 5,000 mm² and below.
    - It handles effort budgets. The effort staircase is 0 → 1 → 4 → 7 months for 0.59 → 3.08 → 8.00 → 9.42×, exact against the sweep. "Three more months buy +18%" is read off the figure.
    - Figures: walk, search efficiency (both panels), sweep (whole space), effort staircase.
 3. **A PIM design for a coding agent.** ReRAM crossbars hold the weights, the LM head and the KV cache (with transposable K writes), a fixed-function nonlinear unit handles softmax and norms, the CPU keeps embedding and sampling, and a CXL-class link connects them.
@@ -55,5 +55,5 @@ Agentic sessions spend 90% of their time decoding one token at a time over a con
 5. Search efficiency vs the exhaustive optimum (`search_main`, `search_effort5`).
 6. The whole space: survival curve plus speedup vs area with the front (`sweep_main`).
 7. Effort staircase (`effort_main`).
-8. Area: speedup vs area with the exact front and the walk under each cap (`area_main`). This is also the strongest walk-vs-TPE result: under area caps TPE misses by up to 8×.
+8. Area: speedup vs area with the exact front and the walk under each cap (`area_main`). This is also the strongest walk-vs-TPE result: under area caps TPE misses by up to 14×.
 9. Sensitivity tornado (`sensitivity_main`).
