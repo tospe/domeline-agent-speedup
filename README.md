@@ -14,16 +14,16 @@ Design notes: `docs/harness.md`. Run log, decisions and status: `docs/autopilot.
 | `harness/design.py` | A design: op -> technology mapping, units, link, precisions |
 | `harness/integrator.py` | One step's time, split into Domeline terms (host, per-tech compute, transfer, launch, write), plus capacity |
 | `harness/session.py` | Session replay over a trace; GPU baseline from measurements |
-| `harness/space.py` | The design space (14 knobs, 575,400 distinct designs), area and effort |
+| `harness/space.py` | The design space (17 knobs: 14 mapping/sizing knobs plus 3 sourced area knobs), area and effort |
 | `harness/evaluate.py` | Budgeted evaluator; Domeline readings for each evaluated design |
 | `harness/search.py` | Domeline walk, hill climbing, random search, TPE, sweeps |
-| `harness/agent.py` | LLM agent searcher (`claude -p`), with or without the readings |
+| `harness/agent.py` | LLM agent searcher (`claude -p` or a local llama-server), with or without the readings |
 | `harness/figstyle.py` | One figure style (IEEE column/page widths, validated palette) |
 | `lib/tech/*.yaml` | Technology library; every entry cites its source, and uncertain numbers are marked VERIFY |
-| `gpu/g1_sweep.sh` | RTX 3080 decode time vs context and KV precision (llama-bench) |
+| `gpu/g1_sweep.sh`, `gpu/g2_sweep.sh` | RTX 3080 decode time vs context and KV precision; past the VRAM wall with KV in host memory |
 | `profile/cpu_ops.c` | Host CPU per-op profile at mini-coder-4b shapes |
 | `traces/run_swebench.py` | Agent runner that logs per-turn traces (context, prefill/decode times, tool times) |
-| `experiments/` | Search comparison, effort staircase, sensitivity, exhaustive sweep and its analysis |
+| `experiments/` | Search comparison, effort staircase, sensitivity, exhaustive sweep and its analysis, iso-area study, second held-out set |
 | `figs/` | One script per figure; figures land in `figures/` |
 | `tests/` | Reproduction of TERINT-GEMV's estimator; fast replay vs exact replay |
 
@@ -43,5 +43,8 @@ python effort_sweep.py --tag main
 python sensitivity.py --tag main
 python sweep_all.py --workers 20 --tag main       # all 575,400 designs, ~11 h on 20 cores
 python sweep_analyze.py --tag main --runs main effort5 effort5_haiku
-cd .. && for f in figs/fig_*.py; do python $f main; done
+python area_sweep.py --budget 150 --workers 20 --tag main
+python search_compare.py --budget 100 --seeds 0 1 2 --agent-seeds 2 --area-cap 3000 --tag area3000
+python heldout_extra.py --runs main effort5
+cd .. && for f in figs/fig_*.py; do python $f main; done; python figs/fig_search.py effort5; python figs/fig_search.py area3000
 ```
