@@ -15,7 +15,7 @@ Agentic sessions spend 90% of their time decoding one token at a time over a con
 ## Contributions, each with its evidence
 
 1. **Domeline: an analytical model for CPU + PIM coprocessors**, generalizing VIPER's closed form to an op graph × technologies × session. It is validated on UPMEM (VIPER: 2.46× measured vs 2.42× predicted), it reproduces the TERINT estimator exactly, and its GPU replay predicts measured decode within 3%.
-   - Figures: model diagram, validation scatter (**TODO**: UPMEM points + gem5 spot checks).
+   - Figures: system/method diagram (`system`), validation scatter (**TODO**: UPMEM points + gem5 spot checks).
 2. **A harness that designs PIM for a workload, guided by the model's readings.** The readings are the binding term, headroom and Amdahl bound. The walk proposes moves from those readings.
    - It is not brute force. The walk reaches the optimum's 1% band in 20 evaluations; the exhaustive sweep needs 575,400. With a gem5-class evaluator (1–3 h per point) the sweep would cost 66–200 CPU-years, and the walk costs one day.
    - It is reliable. The same single-knob moves without readings (hill climbing) fail on 1 of 3 seeds unconstrained and 2 of 3 under an effort cap. TPE needs 2–3× more evaluations and fails under the cap. Random search fails because only 3.8% of designs beat the GPU and 0.03% are within 1% of the optimum.
@@ -50,7 +50,7 @@ Agentic sessions spend 90% of their time decoding one token at a time over a con
 
 1. Trace profile: where session time goes, plus the context CDF (`trace_profile`).
 2. GPU wall: decode time vs context and KV precision; the step past the wall (`gpu_wall`, G2 running).
-3. System model and Domeline readings (diagram, **TODO**).
+3. System and method: the design to scale by arrays, and the harness loop of integrator, readings and policy (`system`).
 4. The walk: speedup per move, each annotated with its reading (`walk_main`).
 5. Search efficiency vs the exhaustive optimum (`search_main`, `search_effort5`).
 6. The whole space: survival curve plus speedup vs area with the front (`sweep_main`).

@@ -35,7 +35,7 @@ Environment:
 | T1 | mini-swe-agent installed, pointed at llama-server, timing subclass logging per-turn trace schema | done; images pulling |
 | T2 | SWE-bench Verified sessions via podman | 100/100 done: 89 frozen workload + 11 second held-out; wall sessions re-run with int8 KV |
 | T3 | Retrieval-agent candidate: tool-share measurement on ~5 sessions | todo |
-| F1 | Figures: profile breakdown, GPU wall, co-design walk, sample-efficiency, effort staircase, headline | done on final data: gpu_wall, trace_profile, walk, search, effort, pareto, sensitivity; sweep (final) |
+| F1 | Figures: profile breakdown, GPU wall, co-design walk, sample-efficiency, effort staircase, headline | done on final data: gpu_wall, trace_profile, walk, search, effort, pareto, sensitivity; sweep (final); system diagram |
 | R1 | Status report artifact for the user at the end | todo |
 
 ## Decisions taken
@@ -97,3 +97,4 @@ Environment:
 - 22:20 Haiku under 3,000 mm2: all 6 runs reach 7.19-7.20x; first within 1% at 16/13/8 evals with readings vs 15/10/12 without (no difference); with readings the agent stops sooner (17-26 vs 26-39 evals). $0.51.
 - 22:30 Sensitivity of the area front to the derived 4-bit-cell area factor: at 1.0/1.27/1.5/2.0x the walk's best under a 3,000 mm2 cap is 8.95/7.16/5.12/4.79x (at 2.0x 4-bit cells stop paying off). The front moves one step per +25%: this is the VERIFY item to source before quoting area numbers.
 - 23:40 Stronger-GPU bar (gpu_scale.py, analytical): decode scaled by bandwidth, prefill by fp16 tensor peak, tools unchanged. Headline design: 9.42x vs 3080 -> 7.10x vs 4090 -> 2.52x vs H100 SXM (search set); held-out 7.24x / 2.54x; late 11.5x / 3.62x. Answers the 'why not a better GPU' objection. Decision: T3 (second workload) stays deferred; no retrieval agent can run without network access, and a synthetic one would not be evidence.
+- 00:20 New figure fig_system (full width): (a) the headline design, with the crossbar bar to scale by arrays (weights 887K, LM head 95K, KV 1.18M at 64K context), the nonlinear unit, and the CXL link to the host; (b) the harness loop: workload -> integrator -> readings -> policy -> next design, with the policies and constraints listed. Closes the Fig. 3 TODO in paper.md.
