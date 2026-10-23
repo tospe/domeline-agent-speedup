@@ -121,9 +121,19 @@ Under each area cap (10 caps, full space, budget 150):
 
 How to present it: a GPU cannot buy single-session latency with area, because decode at batch 1 is bound by memory bandwidth and a second GPU does not halve it. A crossbar coprocessor can, and the front is that trade. Iso-area with the 3080 die (628 mm²) is out of reach at ISAAC's 32 nm for a full 64K context. The 22 nm and 12 nm ReRAM silicon (ISSCC 2019–2024) is where the next factor comes from (future work, not modeled).
 
-## Pending
+## Search under an area cap (`search_compare.py --area-cap 3000 --tag area3000`)
 
-- Nothing running.
+The hardest setting so far (budget 100; the exact subspace front at this cap is 7.19×; the best design found anywhere is 7.20×):
+- **walk:** 7.16× at eval 41;
+- **Sonnet agent:** 7.15–7.20× in 5–10 evaluations with readings, and 7.20× at eval 8 without them ($0.92 for 4 runs);
+- **TPE:** 7.16× on 1 of 3 seeds, 0.63× on the other 2;
+- **random:** 0.39–1.41×;
+- **hill climbing:** at most 0.04× (one seed found nothing feasible).
+
+The conclusion holds in the constrained space too:
+- the readings turn single-knob moves from useless (hill climbing) into the optimum;
+- Sonnet does not need them: its priors plus the knob descriptions are enough;
+- the walk is the only algorithmic searcher that is reliable across all four settings (unconstrained, effort cap, area cap, effort staircase).
 
 ## Open questions for the authors
 

@@ -37,7 +37,7 @@ Agentic sessions spend 90% of their time decoding one token at a time over a con
 | "Analytical model, not silicon." | Validated pieces (UPMEM, TERINT, GPU replay); sensitivity shows which inputs matter. | gem5 spot checks of the final design (Domeline's own pipeline). |
 | "ISAAC numbers are 2016, 32 nm." | They are the conservative case. Newer macros are denser. | Literature table from ISSCC/VLSI ReRAM CIM macros (agent collecting). |
 | "Why not just a better GPU / quantization?" | The 3080 runs Q8_0 like the design does; its int8/int4 KV walls are measured. | Add a stronger GPU point (e.g. 4090 from published bandwidth, or a measured one) as a sanity bar. |
-| "An LLM agent did as well, so why readings?" | True in this space. The readings buy reliability for algorithmic search and an explanation for every move. | Test a larger space (more techs, area knobs), where the priors may break down. |
+| "An LLM agent did as well, so why readings?" | True, including under an area cap (Sonnet: 7.20× in 8 evals without readings). The readings make a deterministic, free, explainable searcher as reliable as the agent. Without them, the same moves (hill climbing) fail at 0.04×, and TPE fails on 2 of 3 seeds. Pitch: Domeline readings let a 50-line policy match an LLM, and every move comes with a reason. | A weaker or local model (e.g. the 4B model itself) as the agent, where the readings may matter. |
 | "One workload." | 100 SWE-bench Verified sessions, held-out sets, repo-stratified. | Second agentic workload (retrieval/web agent, T3), even if small. |
 
 ## Framing choices to settle (authors)

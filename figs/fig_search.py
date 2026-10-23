@@ -71,8 +71,8 @@ def draw(ax, d, methods, top):
             ax.plot([n], [med[n - 1]], marker=st["marker"], color=st["color"], markersize=4, zorder=4)
     ax.axhline(top, color=fs.INK_3, lw=0.7, ls=":")
     ax.axhline(1.0, color=fs.INK_2, lw=0.7, ls="--")
-    ax.annotate("RTX 3080", (B, 1.0), xytext=(0, -2), textcoords="offset points", ha="right",
-                va="top", fontsize=6.5, color=fs.INK_2)
+    ax.annotate("RTX 3080", (B, 1.0), xytext=(0, 2), textcoords="offset points", ha="right",
+                va="bottom", fontsize=6.5, color=fs.INK_2)
     ax.set_xlabel("Design evaluations")
     ax.set_xlim(1, B)
     ax.set_ylim(0, top * 1.15)
