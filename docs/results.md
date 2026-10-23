@@ -151,3 +151,14 @@ The workload's own 4B model, served by llama-server with grammar-constrained JSO
 | Area ≤ 3,000 mm² (optimum 7.20×) | 0.06 / 0.06 / 0.43× | 0.05 / 0.06 / 0.08× |
 
 With readings, 2 of 3 unconstrained runs beat the GPU, against 0 of 3 without. It is the only setting where the readings measurably help an LLM, but n = 3 and the model is far from the optimum either way. At most, report it as suggestive: the readings help a weak agent get past the first offload decisions and do not make it a good designer.
+
+## Haiku under the area cap (`--agent-model haiku --area-cap 3000 --tag area3000_haiku`)
+
+All 6 runs reach the optimum (7.19–7.20×), with or without readings; $0.51 for the 6.
+- **First design within 1%:** at evals 16 / 13 / 8 with readings and 15 / 10 / 12 without. No difference.
+- **Total evaluations before the agent stops:** 26 / 18 / 17 with readings and 39 / 26 / 33 without. With readings the agent stops sooner, and its stop messages cite the binding terms. That saves evaluations, not quality.
+
+Summary across agents:
+- Sonnet and Haiku do not need the readings to find the design.
+- The 4B model is helped a little, but stays far from the optimum.
+- Haiku stops about 40% sooner with readings.
