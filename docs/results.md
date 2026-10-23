@@ -119,6 +119,17 @@ Under each area cap (10 caps, full space, budget 150):
 - **TPE:** matches it only at caps ≥ 6,000 mm². Below that it returns 7.79× (5,000 mm² cap), 0.63× (4,000), 1.97× (3,000), and 0.63× (2,500 and 2,000), against 9.00, 9.00, 7.19, 5.13 and 1.78× available.
 - **Walk fix needed:** the first version of the walk failed under caps (0.04×). It rejected every speed move that broke the cap. The fix reads the area term like any other binding term: a faster move that breaks the cap is paid for with the area move that costs least time (lean tile, 4-bit cells, fewer ADCs, fewer spare arrays, int8 KV). The moves it pays with are logged with the step.
 
+Sensitivity to the derived 4-bit-cell area factor (1.27×). This is the walk's best design under each cap:
+
+| 4-b area factor | cap 4,000 mm² | cap 3,000 mm² | cap 2,500 mm² |
+|---|---|---|---|
+| 1.0× | 8.95× | 8.95× | 7.16× |
+| **1.27× (used)** | **8.95×** | **7.16×** | **5.12×** |
+| 1.5× | 7.16× | 5.12× | 1.97× |
+| 2.0× (4-b cells no longer pay off) | 6.54× | 4.79× | 1.34× |
+
+The area front shifts by one step per +25% in that factor. **It is the number to source before quoting the area front.** A measured 4-bit-per-cell ReRAM CIM macro (ISSCC/VLSI 22 nm) is the right reference.
+
 How to present it: a GPU cannot buy single-session latency with area, because decode at batch 1 is bound by memory bandwidth and a second GPU does not halve it. A crossbar coprocessor can, and the front is that trade. Iso-area with the 3080 die (628 mm²) is out of reach at ISAAC's 32 nm for a full 64K context. The 22 nm and 12 nm ReRAM silicon (ISSCC 2019–2024) is where the next factor comes from (future work, not modeled).
 
 ## Search under an area cap (`search_compare.py --area-cap 3000 --tag area3000`)
