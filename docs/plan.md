@@ -36,17 +36,17 @@ Abstract due Nov 11, paper due Nov 18, 2026. The outline is in the Oct 29 note. 
 
 | # | Item | Status |
 |---|---|---|
-| 13 | VRAM wall: 11% (11/100 traced, `results.md`) vs 8% (`paper.md`). Pick the session set and use one number. | open |
-| 14 | The 575,400 designs and "smallest of 96" hold only in the 14-knob space (the area knobs came later). Either state the scope or rerun E1 and the sweep with the area knobs fixed at their defaults. | open |
-| 15 | "0.6% under caps" and "TPE misses by up to 14×" are measured against the exact front of the 3,456-design crossbar subspace, at the 8 feasible caps. Say so. | open |
+| 13 | VRAM wall: 11% (11/100 traced, `results.md`) vs 8% (`paper.md`). Pick the session set and use one number. | done (Oct 29): both right. 11/100 = all traced (Fig. 1), 7/89 = frozen workload, 4/11 = late. Use 11% (as the paper does); phrasing in `docs/claims_report.md`; `paper.md` aligned |
+| 14 | The 575,400 designs and "smallest of 96" hold only in the 14-knob space (the area knobs came later). Either state the scope or rerun E1 and the sweep with the area knobs fixed at their defaults. | done (Oct 29): state the scope. With the area knobs the space has 6,749,832 distinct designs (561,312 crossbar designs x 12). Scope sentence in `docs/claims_report.md`. `sweep_all.py` now enumerates the 17-knob space, so E1 must fix the area knobs at ISAAC defaults to reuse the 575,400 sweep |
+| 15 | "0.6% under caps" and "TPE misses by up to 14×" are measured against the exact front of the 3,456-design crossbar subspace, at the 8 feasible caps. Say so. | done (Oct 29): walk gap ≤ 0.56% at the 8 settings (no cap + 7 finite caps); TPE misses by 14.3× (4,000 mm² only), 1.16–14.3× at ≤ 5,000 mm²; TPE beats the subspace front uncapped and at 6,000. Front points use the on-die link. Phrasing in `docs/claims_report.md` |
 | 16 | TERINT-GEMV citation: authors and venue are not in the repo | needs your input |
-| 17 | GPU vendor peaks are marked VERIFY (`gpu_scale.py`) | open |
+| 17 | GPU vendor peaks are marked VERIFY (`gpu_scale.py`) | done (Oct 29): all confirmed against NVIDIA GA102/Ada whitepapers and nvidia.com/h100 (dense, fp32 accumulate); no change; sources cited in `gpu_scale.py` |
 
 ### Paper and process
 
 | # | Item | Status |
 |---|---|---|
-| 18 | Automatic claim checker: `experiments/make_numbers.py` generates `numbers.tex` macros from the results; a pytest test fails on hard-coded numbers in `main.tex`, and on any reading the paper names that the code does not compute | open |
+| 18 | Automatic claim checker: `experiments/make_numbers.py` generates `numbers.tex` macros from the results; a pytest test fails on hard-coded numbers in `main.tex`, and on any reading the paper names that the code does not compute | done (Oct 29): `make_numbers.py` → `paper/numbers.{tex,json}`, registry `paper/claims.yaml`, `tests/test_claims.py`, report `docs/claims_report.md`. 224 matched, 6 mismatched, 12 unsourced; headroom and D pending |
 | 19 | Restructure `main.tex` to the outline (the domeline-1c session owns `main.tex`; coordinate) | open (Nov 3–6) |
 | 20 | Add the four inputs to `figures/harness.tex` | open (after 6) |
 | 21 | Tell the advisors the LLM agent is a usage mode, not the contribution, correcting what the Oct 29 email led them to expect | open |
