@@ -185,3 +185,34 @@ Summary across agents:
 - Sonnet and Haiku do not need the readings to find the design.
 - The 4B model is helped a little, but stays far from the optimum.
 - Haiku stops about 40% sooner with readings.
+
+## Roofline vs Domeline (E1) (`experiments/roofline_vs_domeline.py`, `rvd_analyze.py`, `figs/fig_rvd_teaser.py`)
+
+**Scope.** The 280,296 feasible designs of the 575,400-design sweep, i.e. the 14-knob space: the three area knobs stay at their defaults (ISAAC tile, 8 ADCs/IMA, 2-b cells). Feasible means no design crosses the capacity wall inside the workload (64K), so the wall shows up only in the 128K context point and in E2.
+
+**Roofline definition** (plan item 3; `experiments/roofline.py`). Per op, max(flops/peak, bytes/BW) on the op's device, summed per step and replayed over the same sessions as the Domeline (exactly the same grid, tokens and contexts; checked against `WorkloadReplayer` to 4 digits). No link, NoC, launch, writes (KV appends and reprogramming dropped) or wall. Variants: **main** leaves host ops out; **host** puts them on the host roof (200 GOPS, measured STREAM 57 GB/s). The crossbar roof is the device peak (all arrays at once); a per-op crossbar roof (only the arrays holding that matrix, **local**) is reported as a check. Common vocabulary: crossbar, vector unit (vfu), softmax unit (star), host, transfer, launch, write, capacity; Roofline can only ever name the first four.
+
+**Context grid, all 280,296 feasible designs** (single decode steps; 14 min on 20 cores; `results/search/rvd_ctx_main.json`). Host variant:
+
+| point | (a) agree | agree, Domeline top 1% | Roofline/Domeline time, top 1% (median) | (b) Spearman | (c) Roofline best: Domeline rank, time vs opt | top-10 / 100 / 1000 overlap |
+|---|---|---|---|---|---|---|
+| decode 4K | 98.3% | 19.7% | 0.24 | 0.998 | 1–913, 1.00–1.60× | 0.1 / 0.52 / 0.57 |
+| decode 16K | 98.4% | 52.3% | 0.41 | 0.980 | 1–625, 1.00–1.51× | 0.1 / 0.52 / 0.78 |
+| decode 32K | 98.3% | 42.7% | 0.28 | 0.962 | 1–617, 1.00–1.42× | 0.1 / 0.52 / 0.75 |
+| decode 64K | 99.3% | 66.7% | 0.34 | 0.964 | 1–337, 1.00–1.31× | 0.1 / 0.50 / 0.70 |
+| decode 128K (past the workload; 28.9% of designs over capacity) | 70.3% | 33.6% | 0.36 | 0.972 | 1–85, 1.00–1.20× | 0.4 / 0.48 / 0.38 |
+| prefill 256 tokens at 16K | 93.6% | 79.5% | 0.58 | 0.987 | 1–193, 1.00–1.06× | 0.1 / 0.45 / 0.93 |
+
+- **Plainly: over the whole feasible space, the Roofline mostly agrees with the Domeline.** With host ops on the host roof it names the Domeline's binding term for 94–99% of designs at every context inside the workload and ranks designs with Spearman 0.96–0.998. The reason is the space: most feasible designs are bound by the vector unit doing attention (57–75%) or by the host (24–42%), and both are textbook roofline costs (the vfu is compute-bound at 4 GOPS per unit; the Domeline adds only a 5 ns op overhead). This triggers the fallback (plan item 10).
+- **Main variant (host ops left out) is degenerate**: designs that keep everything on the host cost 0, so its "best" design is 235–1,700× slower than the optimum under the Domeline, and it agrees only 57–76% (but 98–100% where the Domeline's binding term is a coprocessor device).
+- **Where it disagrees is where the good designs are.** Among the Domeline's top 1%, the Roofline names the wrong bottleneck for 33–80% of designs (it says "softmax unit compute" or "vector unit"; the Domeline says crossbar reads, or transfers / the wall), and its time is 2.5–4× too optimistic (median). The per-op crossbar roof (local) fixes the bottleneck name in the top 1% at 4K–32K (76–82%) and gets decode time within 0.7–1.1× there, but is 2.5× pessimistic on prefill (no layer pipelining) and names the crossbar for every top-1% prefill design, where the Domeline says softmax unit, vfu or transfers (0% agreement).
+- **Roofline cannot separate the designs that matter.** Its best is an 18-way tie at every context: xbar_scale 2.0 (the device peak grows with arrays, so it prefers the biggest crossbar), int16 KV (more arrays again), with either crossbar tech and any link. At session level (sweep numbers) these are 8.05–9.48×: blind to writes, it cannot tell the transposable crossbar (9.48×) from ISAAC's (8.05×, K appends write 128 rows). And its picks are 30,073 mm² (25,930 mm² for ISAAC) where the Domeline's pick does 9.42–9.47× at 9,729 mm²: 3.1× the area for the same speed.
+- **Past the wall** (128K, beyond the workload, where 28.9% of feasible designs run out of room): agreement drops to 70% overall and to 33% in the Domeline's top 10%, where the binding term is the wall (reprogramming writes) for 66% of designs. The Roofline sees none of them.
+
+**Session level (smoke: first 2,000 feasible rows of the sweep file, a stride sample; `results/search/rvd_smoke_summary.json`).** Domeline numbers reproduce the sweep (max relative time error 5e-6, speedup to the printed 6 digits). Host variant: agreement 94.9%, Spearman 0.987, Roofline's best at Domeline rank 1–24 of 2,000 (time 1.00–1.18× of the subset's best), top-10/100 overlap 0.5/0.72. In the subset's top 1% (22 designs, all crossbar-bound under the Domeline) agreement is 0% (the Roofline says softmax unit or vfu) and the Roofline's LLM time is 0.28× the Domeline's. The full run (280,296 designs, ~3 h on 20 cores) is pending:
+`cd experiments && nohup python roofline_vs_domeline.py --mode session --workers 20 --tag main > ../results/search/rvd_main.log 2>&1 && python rvd_analyze.py --tag main`.
+
+**E2 candidate (Fig. 1 draft, `figures/rvd_teaser.pdf`).** The headline design with its crossbar at 0.75× of what a 64K context needs (25% less area: 7,297 vs 9,729 mm²):
+- Roofline: bound by the softmax unit's compute; 0.034 ms/token at 16K and 0.10 ms at 64K; session 15.5× vs the 3080 (LLM time 17.2 s), *the same as the full-size design* (15.5×). It would pick the smaller design.
+- Domeline: bound by crossbar reads (0.35 ms floor) below the wall; the KV cache outgrows the arrays at 35,457 tokens, inside the workload (the 64K session), and reprogramming writes then bind: 4.2 ms/token at 64K, 41× the Roofline's estimate. Session 8.46× (LLM time 220 s) vs 9.42× for the full-size design. The design is infeasible: it does not hold the workload's longest session.
+- The same design read at 64K vs 1K differs by 11× under the Domeline and by 12× under the Roofline, but for different reasons (writes vs softmax compute), and the Roofline's culprit, the softmax unit, is already at its largest size (64 instances).
