@@ -1,0 +1,367 @@
+# Registry of the paper's quantitative claims (main.tex) and where each number comes from.
+#
+# t: a phrase copied from main.tex (whitespace is normalized; it must occur verbatim).
+# n: one entry per number in the phrase, in order:
+#    MACRO                      the paper's number must equal \MACRO of paper/numbers.json
+#                               at the paper's printed precision
+#    {m: MACRO, check: le}      the paper states an upper bound ("within 0.6%"): value <= paper
+#    {m: MACRO, check: ge}      a lower bound
+#    {m: [A, B]}                every listed macro must match (e.g. the sweep and the walk)
+#    {m: MACRO, tol: x, rel: r, abs: true}   extra absolute/relative tolerance; compare |value|
+#    {src: "..."}               unsourced: no results file computes it (citation, log, assumption)
+#    {setup: "..."} or "-"      a condition of the claim (cap, context length), not a result
+# flag: a phrasing or scope problem to fix in the text (reported, does not fail the test).
+#
+# Regenerate the numbers with experiments/make_numbers.py; check with pytest tests/test_claims.py;
+# write the report with python experiments/claims.py --report docs/claims_report.md.
+
+claims:
+# ---------------------------------------------------------------- abstract
+- id: abs-decode-share
+  t: 'Agentic sessions spend 90\% of their time decoding'
+  n: [{m: shareDecodePct, note: 'all 100 sessions: 91.0%; 90.4% is the frozen 89 (shareDecodeFrozenPct)'}]
+  flag: 'Use 91% (all 100 traced sessions, as Sec. 1 and Fig. 1 do), or say "about 90%".'
+- id: abs-vram
+  t: 'a consumer GPU runs out of it: 11\% of the coding-agent sessions we trace outgrow'
+  n: [vramWallPct]
+- id: abs-sessions
+  t: 'On 100 SWE-bench sessions of a coding agent, the harness finds in about 20 evaluations'
+  n: [nSessionsTraced, walkFirstWithin]
+  flag: 'The 9.4x is measured on the 45 search sessions (9.61x on the 44 held-out), not on all 100; say "On SWE-bench sessions of a coding agent" or "on 45 search sessions".'
+- id: abs-speedup
+  t: 'runs the sessions 9.4\X{} faster than an RTX 3080. The design is within 1\% of the best of 575,400 candidates'
+  n: [walkSpeedupShort, {m: walkGapPct, check: le}, nDesigns]
+  flag: '575,400 is the 14-knob space (area knobs fixed at ISAAC''s tile); see the scope sentence in docs/claims_report.md.'
+- id: abs-caps
+  t: 'Under area and effort caps the harness stays within 0.6\% of the exact optimum, where Bayesian optimization misses by up to 14\X'
+  n: [{m: [walkAreaGapMaxPct, walkGapEffortFivePct], check: le}, tpeAreaMissMaxX]
+  flag: '"exact optimum" is, under area caps, the exact front of the 3,456-design crossbar subspace (not the full space); the 14x is TPE at the 4,000 mm2 cap only. Suggested: "within 0.6% of the exact optimum under effort caps and of the exact area-speed front under area caps, where TPE misses by up to 14x".'
+# ---------------------------------------------------------------- introduction
+- id: intro-decode
+  t: 'decode takes 91\% of session time on an RTX 3080, and the final context reaches 64K tokens'
+  n: [shareDecodePct, maxCtxK]
+- id: intro-vram
+  t: 'On the 3080, 11\% of the sessions run out of VRAM; past that wall, decode is 26\X{} slower'
+  n: [vramWallPct, gpuCliffX]
+- id: intro-space
+  t: 'Our space has 14 knobs and 575,400 distinct designs, before area knobs'
+  n: [nKnobsBase, nDesigns]
+- id: intro-viper
+  t: 'predicts the end-to-end latency of an offloaded kernel within 10\%'
+  n: [{src: 'external: VIPER paper [viper]'}]
+- id: intro-summary
+  t: 'runs its sessions 9.4\X{} faster than an RTX 3080. It reaches the optimum''s 1\% band in 20 evaluations, where an exhaustive sweep needs 575,400'
+  n: [walkSpeedupShort, bestTolPct, walkFirstWithin, nDesigns]
+- id: contrib-replay
+  t: 'its GPU replay predicts measured decode time within 3\%'
+  n: [{m: gpuReplayErrMaxAbsPct, check: le}]
+- id: contrib-search
+  t: 'of a 575,400-design space: the walk lands within 1\% unconstrained and within 0.6\% of the exact front under every feasible area cap'
+  n: [nDesigns, {m: walkGapPct, check: le}, {m: walkAreaGapMaxPct, check: le}]
+  flag: 'Name the front: "of the exact front of the 3,456-design crossbar subspace".'
+- id: contrib-design
+  t: '9.42\X{} faster than the 3080 on the search sessions, 9.61\X{} on held-out sessions, and 2.5\X{} faster than an H100 when scaled; decode takes 0.40--0.77\,ms per token from 4K to 64K context'
+  n: [walkSpeedup, walkHeldout, vsHHundred, decodeFourKMs, decodeSixtyFourKMs, '-', '-']
+# ---------------------------------------------------------------- background
+- id: bg-model
+  t: 'layout~\cite{qwen3}: 36 layers'
+  n: [nLayers]
+- id: bg-tasks
+  t: 'on 100 repository-stratified SWE-bench Verified tasks'
+  n: [nSessionsTraced]
+- id: bg-gpu
+  t: 'RTX 3080 (10\,GB, 760\,GB/s)'
+  n: [{src: 'external: NVIDIA RTX 3080 spec (10 GB GDDR6X)'}, gpuBandwidthThreeEighty]
+- id: bg-shares
+  t: 'decode 91\%, prefill 4\%, tools 5\%'
+  n: [shareDecodePct, sharePrefillPct, shareToolPct]
+- id: bg-yuan
+  t: '(decode is 91--99\% of LLM time~\cite{yuan2026agentic})'
+  n: [{src: 'external: [yuan2026agentic]'}, {src: 'external: [yuan2026agentic]'}]
+- id: bg-walls
+  t: 'wall falls at 32--36K tokens with an fp16 KV cache and 64--80K with int8'
+  n: [wallFpSixteenLoK, wallFpSixteenHiK, wallIntEightLoK, wallIntEightHiK]
+- id: bg-cliff
+  t: 'decode slows from 14\,ms to 373\,ms per token at 32K'
+  n: [gpuDecodeThirtyTwoKMs, gpuOffloadThirtyTwoKMs, '-']
+- id: fig-trace
+  t: '\caption{100 coding-agent sessions on an RTX 3080'
+  n: [nSessionsTraced]
+- id: fig-trace-wall
+  t: '11\% of sessions cross the 3080''s fp16-KV wall'
+  n: [vramWallPct]
+- id: bg-viper
+  t: 'It predicts latency within 10\% in under a minute'
+  n: [{src: 'external: VIPER paper [viper]'}]
+# ---------------------------------------------------------------- model
+- id: model-lib
+  t: '(128$\times$128 arrays, 2-bit cells, 100\,ns read)'
+  n: [xbarRows, xbarRows, xbarCellBits, xbarReadNs]
+- id: model-replay
+  t: 'it stays within 0.3\% of the exact per-turn replay'
+  n: [{m: replayErrWorkloadPct, check: le, note: 'workload LLM time 0.01%; worst single session 0.52% (replayErrMaxPct)'}]
+  flag: 'True for the workload total (0.01%), not per session (worst 0.52% on the headline design). Say "within 0.3% over the workload (0.5% for any one session)".'
+- id: valid-viper
+  t: '2.42\X{} predicted against 2.46\X{} measured for a Llama2 layer'
+  n: [{src: 'external: earlier VIPER UPMEM study (docs/harness.md); no results file here'},
+      {src: 'external: earlier VIPER UPMEM study (docs/harness.md); no results file here'}]
+- id: valid-replay
+  t: 'predicts its measured decode time within 2--3\%'
+  n: [{setup: 'lower end of a range'}, {m: gpuReplayErrMaxAbsPct, check: le}]
+  flag: 'The 3080 curve under-predicts each session by 0.4-2.9% (aggregate -1.7%, 100 sessions); "within 2-3%" reads as a band. Say "within 3%" as in Sec. 1.'
+- id: space-knobs
+  t: 'For the coding agent the space has 14 knobs'
+  n: [nKnobsBase]
+- id: space-designs
+  t: 'there are 575,400 distinct designs, all with ISAAC''s tile'
+  n: [nDesigns]
+  flag: 'Scope: with the 3 area knobs the space has 6,749,832 distinct designs (17 knobs). See docs/claims_report.md for the sentence.'
+- id: space-area-knobs
+  t: 'a lean tile without the eDRAM buffer, 8, 4 or 2 ADCs per IMA, and 2- or 4-bit cells'
+  n: [knobAdcA, knobAdcB, knobAdcC, knobCellBitsA, knobCellBitsB]
+# ---------------------------------------------------------------- harness
+- id: alg-stop
+  t: 'LLM time of $d > 2\%$ of tool time'
+  n: [walkStopPct]
+- id: alg-shrink
+  t: 'while $T$ stays within 1\%'
+  n: [shrinkTolPct]
+- id: walk-eps
+  t: 'improves time by more than $\epsilon=0.5\%$'
+  n: [walkEpsPct]
+- id: walk-stop
+  t: 'when LLM time falls to 2\% of tool time, that is, when the roof is within 2\% of the Amdahl sheet'
+  n: [walkStopPct, walkStopPct]
+- id: repair
+  t: 'Without this repair, the walk returned 0.04\X{} under every cap'
+  n: [{src: 'log only: docs/autopilot.md 19:45 (first iso-area run, overwritten by area_main.json)'}]
+- id: base-budget
+  t: 'Every searcher gets 100 evaluations'
+  n: [budget]
+  flag: 'The area study gives 150 (stated in Sec. 5.2); say "100 evaluations (150 in the area study)".'
+- id: base-best
+  t: 'the smallest design within 1\% of the fastest it found'
+  n: [bestTolPct]
+- id: base-sweep
+  t: 'We also evaluate all 575,400 designs (11.5\,h on 20 cores)'
+  n: [nDesigns, sweepHours, sweepWorkers]
+- id: base-sub
+  t: 'over the 3,456 designs that vary the crossbar and area knobs'
+  n: [nSub]
+# ---------------------------------------------------------------- evaluation setup
+- id: setup
+  t: 'The 89 sessions collected first form a frozen workload, split by a seeded shuffle into 45 search sessions and 44 held-out sessions; 11 sessions collected after'
+  n: [nSessionsFrozen, nSearch, nHeldout, nSessionsLate]
+- id: setup-kv8
+  t: 're-run with int8 KV at 64K'
+  n: [{setup: 'trace setup (docs/autopilot.md)'}]
+# ---------------------------------------------------------------- the walk
+- id: fig-walk
+  t: 'under the Amdahl bound of 16.7\X'
+  n: [amdahlBound]
+- id: walk-start
+  t: 'is 25\X{} \emph{slower} than the GPU (0.04\X)'
+  n: [walkStartSlowerX, walkStart]
+- id: walk-attn
+  t: 'Moving attention onto crossbars gives 0.45\X'
+  n: [walkAttention]
+- id: walk-softmax
+  t: 'Moving softmax to the fixed-function unit (0.80\X) and the LM head to crossbars (1.39\X) passes the GPU; norms leave the host (1.75\X)'
+  n: [walkSoftmax, walkLmHead, walkNorms]
+- id: walk-sizing
+  t: 'the walk sizes them (2.5--6.5\X)'
+  n: [walkSizingLo, walkSizingHi]
+- id: walk-transpose
+  t: 'transposable writes make it one row (7.4\X)'
+  n: [walkTranspose]
+- id: walk-final
+  t: 'Moving norms to the fixed-function unit (8.47\X) and sizing it to 64 units gives 9.42\X'
+  n: [walkNormsStar, walkStarUnits, walkSpeedup]
+- id: walk-shrink
+  t: 'cuts area from 18,796 to 9,729\,mm$^2$'
+  n: [walkAreaBeforeShrink, walkArea]
+- id: walk-units
+  t: 'and 64 units finish the climb'
+  n: [walkStarUnits]
+- id: walk-stop-reading
+  t: 'at 9.42\X{}, tools take 56\% of workload time, and the Amdahl bound is 16.7\X'
+  n: [walkSpeedup, toolShareAtWalkPct, amdahlBound]
+# ---------------------------------------------------------------- search
+- id: fig-search
+  t: '(shaded: range over 3 seeds)'
+  n: [tpeSeeds]
+- id: fig-search-opt
+  t: 'Dotted: the exhaustive optimum, 9.48\X'
+  n: [sweepOptimum]
+- id: tab-caption
+  t: 'Gap to the best design and evaluation of the first design within 1\% of it; for multi-seed rows, how many runs got within 1\%. Budget 100. Algorithmic searchers: 3 seeds; Sonnet: 1--2 runs per variant'
+  n: [bestTolPct, bestTolPct, budget, tpeSeeds, sonnetRunsPerVariantLo, sonnetRunsPerVariantHi]
+- id: tab-head
+  t: '& No cap & Effort $\le$5\,mo & Area $\le$3,000\,mm$^2$'
+  n: ['-', '-']
+- id: tab-opt
+  t: '(opt.\ 9.48\X) & (opt.\ 8.05\X) & (best 7.20\X)'
+  n: [sweepOptimum, sweepOptimumEffortFive, areaThreeKBestKnown]
+- id: tab-walk
+  t: '\sys{} walk & 0.7\%, eval 20 & 0.6\%, eval 24 & 0.5\%, eval 41'
+  n: [walkGapPct, walkFirstWithin, walkGapEffortFivePct, walkFirstWithinEffortFive, walkGapAreaThreeKPct,
+      walkFirstWithinAreaThreeK]
+- id: tab-tpe
+  t: 'TPE & 3/3, evals 41--69 & 1/3 & 1/3'
+  n: [tpeWithinCount, tpeSeeds, tpeFirstWithinLo, tpeFirstWithinHi, tpeWithinEffortFiveCount, tpeSeedsEffortFive,
+      tpeWithinAreaThreeKCount, tpeSeeds]
+- id: tab-hill
+  t: 'Hill climbing & 2/3 & 1/3 & $\le$0.04\X'
+  n: [hillWithinCount, hillSeeds, hillWithinEffortFiveCount, hillSeedsEffortFive, {m: hillBestAreaThreeK, check: le}]
+- id: tab-random
+  t: 'Random & 0/3 & 0/3 & $\le$1.41\X'
+  n: [randomWithinCount, randomSeeds, randomWithinEffortFiveCount, randomSeedsEffortFive,
+      {m: randomBestAreaThreeK, check: le}]
+- id: tab-sonnet
+  t: 'Sonnet agent & evals 4--10 & evals 9--11 & evals 5--8'
+  n: [sonnetFirstWithinLo, sonnetFirstWithinHi, sonnetFirstWithinEffortFiveLo, sonnetFirstWithinEffortFiveHi,
+      sonnetFirstWithinAreaThreeKLo, sonnetFirstWithinAreaThreeKHi]
+- id: sweep-stats
+  t: 'Of the 575,400 designs, 280,296 are feasible; only 3.8\% of those beat the 3080, and 96 (0.03\%) are within 1\% of the optimum of 9.48\X'
+  n: [nDesigns, nFeasible, beatGpuPct, nWithinOnePct, withinOnePctOfFeasiblePct, bestTolPct, sweepOptimum]
+- id: sweep-smallest
+  t: 'The walk''s design is the smallest of these 96'
+  n: [nWithinOnePct]
+  flag: 'Holds in the 14-knob space only; with the area knobs, the lean-tile variant of the same design (5,833 mm2, 9.42x) is smaller. The parenthesis says so; keep it.'
+- id: reliable-band
+  t: 'reaches the optimum''s 1\% band in every setting'
+  n: [bestTolPct]
+- id: reliable-hill
+  t: 'gets stuck on 1 of 3 seeds unconstrained and 2 of 3 under the effort cap'
+  n: [hillMissedCount, hillSeeds, hillMissedEffortFiveCount, hillSeedsEffortFive]
+- id: reliable-tpe
+  t: 'TPE needs 2--3\X{} more evaluations unconstrained and fails on 2 of 3 seeds under either cap'
+  n: [tpeEvalRatioLo, tpeEvalRatioHi, {m: [tpeMissedEffortFiveCount, tpeMissedAreaThreeKCount]}, tpeSeeds]
+  flag: 'TPE''s first design within 1% comes at evals 41, 42 and 69 against the walk''s 20: 2.0-3.5x. "2-3x" rounds 3.45 down; "2-3.5x" is exact.'
+- id: caps-setup
+  t: 'We run the walk and TPE with 150 evaluations under ten area caps'
+  n: [areaBudget]
+  flag: '"ten area caps" counts the uncapped run: the study has no cap plus nine caps (8,000 to 1,000 mm2), and "all eight caps where a design fits" also counts the uncapped run (7 finite caps fit). Say "under no cap and nine area caps ... at all eight settings where a 64K-context design fits".'
+- id: caps-walk
+  t: 'At all eight caps where a 64K-context design fits, the walk lands within 0.6\% of the exact area--speed front, in 31--90 evaluations'
+  n: ['-', {m: walkAreaGapMaxPct, check: le}, walkAreaEvalsLo, walkAreaEvalsHi]
+  flag: 'The front is exact over the 3,456-design crossbar subspace only (the rest fixed at the headline design); TPE beats it at 6,000 mm2 and uncapped (9.48x vs 9.47x) by leaving the subspace. 31-90 is all evaluations used; the first within 1% of the front comes at evals 28-80.'
+- id: caps-tpe
+  t: 'TPE matches the front only without a cap and at 6,000\,mm$^2$: at 8,000\,mm$^2$ it returns 9.01\X{} where 9.47\X{} is available, and at 5,000\,mm$^2$ and below 0.63--7.79\X{} where 1.78--9.00\X{} is'
+  n: ['-', '-', tpeAreaEightK, frontAreaEightK, '-', tpeAreaLowLo, tpeAreaLowHi, frontAreaLowLo, frontAreaLowHi]
+- id: caps-stair
+  t: 'Under effort caps the walk reproduces the exact staircase of the sweep: 0.59, 3.08, 8.00 and 9.42\X{} for 0, 1, 4 and 7 months of effort'
+  n: [{m: [stairSweepZero, stairWalkZero]}, {m: [stairSweepOne, stairWalkOne]}, {m: [stairSweepFour, stairWalkFour]},
+      {m: [stairSweepSeven, stairWalkSeven]}, '-', '-', '-', '-']
+  flag: 'At 1 month the walk returns 3.07x (smallest design within 1%) where the sweep''s best is 3.08x; say "matches the sweep''s staircase within 0.2%: 0.59, 3.07, 8.00 and 9.42x".'
+- id: caps-gain
+  t: 'Three more months buy 18\%'
+  n: [stairGainLastPct]
+- id: agents-haiku
+  t: 'Haiku stops about 40\% sooner'
+  n: [{m: haikuStopsSoonerPct, tol: 3}]
+- id: agents-local
+  t: 'the 4B model beats the GPU on 2 of 3 runs with readings and 0 of 3 without'
+  n: [localBeatGpuReadings, localRuns, localBeatGpuScalar, localRuns]
+- id: cost-evals
+  t: 'The walk reaches the 1\% band in 20--41 evaluations (30--50 in all, across the three settings); the sweep needs 575,400'
+  n: [bestTolPct, walkFirstWithin, walkFirstWithinRangeHi, walkEvalsRangeLo, walkEvalsRangeHi, nDesigns]
+- id: cost-gem5
+  t: 'With a gem5-class evaluator at 1--3\,h per design, the sweep would take 66--200 CPU-years and the walk one day'
+  n: [gemFiveHoursLo, gemFiveHoursHi, gemFiveCpuYearsLo, {m: gemFiveCpuYearsHi, tol: 5}]
+  flag: '"the walk one day" holds only at 1 h per design for its first 20 evaluations; 30-50 serial evaluations at 1-3 h take 1.2-6.2 days. Say "and the walk 1-6 days".'
+# ---------------------------------------------------------------- the design
+- id: design-arrays
+  t: 'in 2.16M ReRAM crossbars with transposable K writes, runs softmax, norms, RoPE and SiLU on 64 fixed-function units'
+  n: [nArraysM, walkStarUnits]
+- id: design-speedups
+  t: 'It runs the search sessions 9.42\X{} faster than the 3080 and the held-out sessions 9.61\X{} faster. On the 11 sessions collected after the search, it is 15.4\X{} faster'
+  n: [walkSpeedup, walkHeldout, nSessionsLate, lateSpeedup]
+- id: design-late-amdahl
+  t: '(their Amdahl bound is 54\X)'
+  n: [lateAmdahl]
+- id: design-pertoken
+  t: 'decode takes 0.40\,ms at 4K context and 0.77\,ms at 64K, against 7.5--28\,ms on the 3080'
+  n: [decodeFourKMs, '-', decodeSixtyFourKMs, '-', gpuDecodeEmptyMs, gpuDecodeSixtyFourKMs]
+- id: design-ratio
+  t: '21\X{} at 4K and 25\X{} at 32K'
+  n: [perTokenFourKX, '-', perTokenThirtyTwoKX, '-']
+- id: design-floor
+  t: 'sets a flat floor of 0.35\,ms'
+  n: [xbarFloorMs]
+- id: domeline-roof
+  t: 'the roof stays at 50--67\% of the Amdahl sheet; the 3080 sits 7--11\X{} lower before its VRAM wall at 34K tokens'
+  n: [roofAmdahlLoPct, roofAmdahlHiPct, roofOverGpuLoX, roofOverGpuHiX, gpuWallFigK]
+  flag: 'Over 1K-64K the roof is at 50.6-67.5% of the Amdahl sheet: "51-68%" at the printed precision (or "about 50-70%").'
+- id: domeline-wall
+  t: 'The design''s own wall lies just past 64K tokens'
+  n: [{m: designWallK, check: ge}]
+- id: domeline-small
+  t: 'The 2,872\,mm$^2$ design has the same shape'
+  n: [frontAdcFourArea]
+- id: fig-domeline-agent
+  t: '$t_\mathrm{fix}=0.79$\,ms, so the Amdahl sheet is at 1,272 tokens/s'
+  n: [tFixMs, amdahlTokS]
+- id: gpus
+  t: 'the design is 7.1\X{} faster than an RTX 4090 and 2.5\X{} faster than an H100 SXM on session time'
+  n: [vsFourNinety, vsHHundred]
+- id: area-die
+  t: 'at its 32\,nm density it takes 9,729\,mm$^2$, about 15\X{} the 3080''s die'
+  n: [{src: 'external: ISAAC [isaac], 32 nm'}, walkArea, walkAreaOverDie]
+- id: area-tile
+  t: 'The arrays are under 1\% of a tile'
+  n: [{src: 'external: ISAAC Table I (arrays 0.0024 of the 0.372 mm2 tile); not computed by any script'}]
+- id: area-kv
+  t: '55\% of the arrays hold KV sized for the single 64K session'
+  n: [kvArraysPct, maxCtxK]
+- id: area-front
+  t: 'The exact front trades area for speed: 9.47\X{} at 5,833\,mm$^2$ with a lean tile, 9.00\X{} at 3,692\,mm$^2$ with 4-bit cells, 7.19\X{} at 2,872\,mm$^2$ and 5.13\X{} at 2,461\,mm$^2$ with 4 and 2 ADCs per IMA; below 1,600\,mm$^2$ a 64K context no longer fits'
+  n: [frontLeanSpeedup, frontLeanArea, frontCellFourSpeedup, frontCellFourArea, knobCellBitsB, frontAdcFourSpeedup,
+      frontAdcFourArea, frontAdcTwoSpeedup, frontAdcTwoArea, knobAdcB, knobAdcC, {m: frontMinArea, tol: 15}, '-']
+  flag: 'Every one of these front points also uses the on-die link (+9 months of effort); with the headline''s CXL link the same areas give 9.42, 8.95, 7.16 and 5.12x, which is what the walk returns under the caps. Say "with a lean tile and an on-die link" or quote the CXL numbers. The smallest design that fits is 1,612 mm2.'
+- id: area-todo
+  t: 'node scaling to 22/12\,nm ReRAM'
+  n: ['-', '-']
+- id: sens-base
+  t: 'on all 89 sessions (base 9.52\X)'
+  n: [nSessionsFrozen, sensBase]
+- id: sens-read
+  t: 'Only the crossbar read cycle (100\,ns, from ISAAC) moves the result much: 11.0\X{} and 7.5\X'
+  n: [xbarReadNs, sensReadHalf, sensReadDouble]
+- id: sens-small
+  t: 'move it by at most 4\%; the link, write latency and host kernels by under 1\%'
+  n: [{m: sensStarMaxPct, check: le}, {m: sensSmallMaxPct, check: le}]
+- id: sens-cell4
+  t: 'the 4-bit-cell area factor shifts the area front by one step per $+25\%$'
+  n: [knobCellBitsB, {src: 'docs/results.md table (4-b area factor 1.0/1.27/1.5/2.0); no script or results file produces it'}]
+- id: limits-isaac
+  t: 'The ISAAC parameters are from 2016 at 32\,nm'
+  n: [{src: 'external: ISAAC (ISCA 2016)'}]
+- id: concl
+  t: 'runs a coding agent 9.4\X{} faster than an RTX 3080 in about 20 evaluations, within 1\% of the best of 575,400 designs'
+  n: [walkSpeedupShort, walkFirstWithin, {m: walkGapPct, check: le}, nDesigns]
+- id: concl-caps
+  t: 'Under area and effort constraints it stays at the exact optimum where black-box search fails'
+  n: []
+  flag: 'Overclaim: it stays within 0.6% (the 1% smallest-design rule), not at the optimum, and TPE does reach it at some caps (6,000 mm2, 5 months on 1 of 3 seeds). Say "within 0.6% of the exact optimum, where black-box search misses by up to 14x".'
+
+# Domeline readings the paper may name, and the fields of harness/evaluate.py that compute them.
+readings:
+- name: binding term
+  paper: ['binding term']
+  code: [Eval.terms]
+  note: 'argmax over Eval.terms (the walk reads it in harness/search.py proposals)'
+- name: Amdahl bound
+  paper: ['Amdahl bound']
+  code: [Evaluator.amdahl_bound_s, Eval.tools_s]
+- name: headroom
+  paper: ['headroom']
+  code: [Eval.headroom, Eval.headroom_s, Eval.headroom_ctx, Evaluator.headroom]
+  pending: true
+  note: 'another session is adding it to harness/evaluate.py (plan item 4)'
+- name: data held in PIM
+  paper: ['held in PIM', 'holds in PIM', 'resident in PIM']
+  code: [Eval.data_in_pim, Eval.data_in_pim_bytes, Eval.pim_bytes, Eval.footprint_bytes, Eval.resident_bytes,
+         Eval.d_bytes, Eval.D]
+  pending: true
+  note: 'the D axis (plan item 1); another session is adding it'

@@ -188,6 +188,7 @@ def sweep():
             hit = [r["n_first_within_1pct"] for r in rs if r["n_first_within_1pct"] is not None]
             put(f"{mn.lower()}Within{nm}Count", len(hit), ",", src, f"of {len(rs)} seeds within 1%")
             put(f"{mn.lower()}Seeds{nm}", len(rs), ",", src)
+            put(f"{mn.lower()}Missed{nm}Count", len(rs) - len(hit), ",", src, "seeds never within 1%")
             if hit and m == "tpe":
                 put(f"tpeFirstWithin{nm}Lo", min(hit), ",", src)
                 put(f"tpeFirstWithin{nm}Hi", max(hit), ",", src)
@@ -210,6 +211,8 @@ def sweep():
     n = s["n_designs"]
     put("gemFiveCpuYearsLo", n * GEM5_H_PER_POINT[0] / HOURS_PER_YEAR, 0, src + " x 1 h per design")
     put("gemFiveCpuYearsHi", n * GEM5_H_PER_POINT[1] / HOURS_PER_YEAR, 0, src + " x 3 h per design")
+    put("gemFiveHoursLo", GEM5_H_PER_POINT[0], 0, "assumption (paper): gem5-class evaluator, h per design")
+    put("gemFiveHoursHi", GEM5_H_PER_POINT[1], 0, "assumption (paper): gem5-class evaluator, h per design")
     return s
 
 
@@ -290,7 +293,9 @@ def searchers():
     put("walkAreaThreeK", wa["best"]["speedup"], 2, src3)
     for m_, nm in (("tpe", "tpe"), ("hill_climb", "hill"), ("random", "random")):
         rs = [r for r in a3["runs"] if r["method"] == m_]
-        put(f"{nm}WithinAreaThreeKCount", sum(first_within(r, 0.99 * best_known) is not None for r in rs), ",", src3)
+        hits = sum(first_within(r, 0.99 * best_known) is not None for r in rs)
+        put(f"{nm}WithinAreaThreeKCount", hits, ",", src3)
+        put(f"{nm}MissedAreaThreeKCount", len(rs) - hits, ",", src3)
         put(f"{nm}BestAreaThreeK", max((r["best"]["speedup"] for r in rs if r.get("best")), default=0), 2, src3,
             "best of the seeds")
     ag = [first_within(r, 0.99 * best_known) for r in a3["runs"] if r["method"].startswith("agent")]
@@ -305,6 +310,12 @@ def searchers():
         ",", "main / effort5 / area3000")
     put("walkEvalsRangeHi", max(w["evals"], next(r for r in e5["runs"] if r["method"] == "walk")["evals"], wa["evals"]),
         ",", "main / effort5 / area3000")
+    e_lo = NUM["walkFirstWithin"]["value"]
+    e_hi = NUM["walkEvalsRangeHi"]["value"]
+    put("walkGemFiveDaysLo", e_lo * GEM5_H_PER_POINT[0] / 24, 1, "walk evals x 1 h, serial",
+        "first-within-1% evals (unconstrained) at 1 h each")
+    put("walkGemFiveDaysHi", e_hi * GEM5_H_PER_POINT[1] / 24, 1, "walk evals x 3 h, serial",
+        "all evals of the longest setting at 3 h each")
     # Haiku: evaluations before stopping, with vs without readings (area cap).
     wr = sum(r["evals"] for r in ah["runs"] if r["method"] == "agent")
     wo = sum(r["evals"] for r in ah["runs"] if r["method"] == "agent_scalar")
@@ -509,6 +520,8 @@ def integrator(rows):
     put("gpuReplayErrPct", 100 * (pred / meas - 1), 1, "harness GpuBaseline curve vs measured decode, 100 sessions",
         f"per-session range {min(per):.1f}..{max(per):.1f}%")
     per.sort()
+    put("gpuReplayErrMaxAbsPct", max(abs(x) for x in per), 1, "harness GpuBaseline vs measured, worst session")
+    put("gpuReplayErrMinAbsPct", min(abs(x) for x in per), 1, "harness GpuBaseline vs measured, best session")
     put("gpuReplayErrP10Pct", per[len(per) // 10], 1, "per-session decile")
     put("gpuReplayErrP90Pct", per[9 * len(per) // 10], 1, "per-session decile")
 
@@ -521,6 +534,15 @@ def params():
     sig = inspect.signature(search.domeline_walk).parameters
     src = "harness/search.py domeline_walk defaults"
     put("walkEpsPct", 100 * sig["tol"].default, 1, src)
+    from harness.evaluate import Evaluator
+    put("bestTolPct", 100 * inspect.signature(Evaluator.best).parameters["tol"].default, 0,
+        "harness/evaluate.py Evaluator.best (smallest design within tol of the fastest)")
+    for i, v in enumerate(KNOBS["adc_per_ima"]):
+        put("knobAdc" + "ABC"[i], v, ",", "harness/space.py KNOBS adc_per_ima")
+    for i, v in enumerate(KNOBS["cell_bits"]):
+        put("knobCellBits" + "AB"[i], v, ",", "harness/space.py KNOBS cell_bits")
+    cfg = json.loads((Path("/localhome/tsousape/models/mini-coder-4b") / "config.json").read_text())
+    put("nLayers", cfg["num_hidden_layers"], ",", "mini-coder-4b config.json")
     put("walkStopPct", 100 * sig["stop_frac"].default, 0, src)
     put("shrinkTolPct", 100 * sig["shrink_tol"].default, 0, src)
     put("nKnobsAll", len(KNOBS), ",", "harness/space.py KNOBS")
