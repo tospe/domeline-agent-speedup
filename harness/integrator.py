@@ -42,6 +42,66 @@ class StepResult:
         return self.terms.get(k, 0.0)
 
 
+def _weight_tensor(op):
+    return "lm_head" if op.kind == "lm_head" else "w." + op.kind
+
+
+def _kv_tensor(op):
+    return {"attn_score": "kv.K", "attn_value": "kv.V"}.get(op.kind, "kv." + op.kind)
+
+
+def _array_bytes(t):
+    """Bytes one crossbar array stores."""
+    return t.p("rows") * t.p("cols") * t.p("bits_per_cell") / 8
+
+
+@dataclass
+class Residency:
+    """D, the data held in PIM at one context length (bytes).
+
+    tensors   tech -> tensor -> logical bytes (w.<kind>, lm_head, kv.K, kv.V)
+    occupied  tech -> bytes of storage those tensors take (whole crossbar arrays)
+    capacity  tech -> bytes the design provides (arrays x array bytes, or local memory)
+    """
+    ctx: int
+    tensors: Dict[str, Dict[str, float]]
+    occupied: Dict[str, float]
+    capacity: Dict[str, float]
+
+    @property
+    def D(self):
+        """Total bytes resident on the coprocessor."""
+        return sum(sum(v.values()) for v in self.tensors.values())
+
+    @property
+    def D_wall(self):
+        """Total bytes the design can hold (inf if some tech has unbounded memory)."""
+        return sum(self.capacity.values())
+
+    def by_tensor(self):
+        out = defaultdict(float)
+        for v in self.tensors.values():
+            for k, b in v.items():
+                out[k] += b
+        return dict(out)
+
+    def headroom(self):
+        """Per tech: capacity - occupied, in bytes (negative = past the wall)."""
+        return {n: self.capacity[n] - self.occupied[n] for n in self.occupied}
+
+    def binding_headroom(self):
+        """(tech, bytes) with the least headroom; (None, inf) if nothing is held."""
+        h = self.headroom()
+        if not h:
+            return None, math.inf
+        n = min(h, key=lambda k: h[k])
+        return n, h[n]
+
+    @property
+    def over(self):
+        return any(v < 0 for v in self.headroom().values())
+
+
 class Integrator:
     def __init__(self, model, lib: Dict[str, Tech]):
         self.model = model
@@ -58,40 +118,76 @@ class Integrator:
 
     # -- capacity ------------------------------------------------------------
 
-    def capacity(self, design, ctx, ops=None):
-        """Units each tech needs (crossbar arrays; bytes for digital local memory)."""
-        ops = ops or self.ops(1, ctx)
-        need = defaultdict(float)
+    def _resident(self, design, ctx, ops):
+        """What each coprocessor tech holds at context ctx, one entry per op that stores data.
+
+        Yields (capacity key, tensor, logical bytes, units needed). The capacity key is
+        the tech name (units = crossbar arrays) or "<tech>:bytes" (units = bytes of local
+        memory). Logical bytes are the tensor at its precision, before array padding.
+        """
         spec, wb, kb = self.model, design.weight_bits, design.kv_bits
-        group = spec.heads // spec.kv_heads
         for op in ops:
             t = self.lib[design.tech_for(op)]
             if t.kind == "crossbar":
                 if op.cls == O.MVM_STATIC:
                     M, N = op.shape
-                    need[t.name] += xbar_arrays_for(t, M, N, wb)
+                    yield t.name, _weight_tensor(op), M * N * wb / 8, xbar_arrays_for(t, M, N, wb)
                 elif op.kind == "attn_score":
                     # K stored with the head dim on rows: N = head_dim inputs, ctx outputs.
-                    need[t.name] += spec.kv_heads * xbar_arrays_for(t, ctx, spec.head_dim, kb)
+                    yield (t.name, "kv.K", spec.kv_heads * ctx * spec.head_dim * kb / 8,
+                           spec.kv_heads * xbar_arrays_for(t, ctx, spec.head_dim, kb))
                 elif op.kind == "attn_value":
-                    need[t.name] += spec.kv_heads * xbar_arrays_for(t, spec.head_dim, ctx, kb)
+                    yield (t.name, "kv.V", spec.kv_heads * spec.head_dim * ctx * kb / 8,
+                           spec.kv_heads * xbar_arrays_for(t, spec.head_dim, ctx, kb))
             elif t.kind in ("digital", "dram_pim"):
                 if op.cls == O.MVM_DYNAMIC:
-                    need[t.name + ":bytes"] += op.kv_read_elems * kb / 8
+                    nbytes = op.kv_read_elems * kb / 8
+                    yield t.name + ":bytes", _kv_tensor(op), nbytes, nbytes
                 elif op.cls == O.MVM_STATIC and t.p("weights_local", True):
                     M, N = op.shape
-                    need[t.name + ":bytes"] += M * N * wb / 8
-        cap = {}
-        for k, v in need.items():
+                    nbytes = M * N * wb / 8
+                    yield t.name + ":bytes", _weight_tensor(op), nbytes, nbytes
+
+    def _have(self, design, k):
+        name, _, unit = k.partition(":")
+        t = self.lib[name]
+        if unit == "bytes":
+            return t.p("local_mem_bytes", float("inf")) * (
+                design.units.get(name, 1) if t.p("mem_scales_with_units", False) else 1)
+        return design.units.get(name, 0)
+
+    def capacity(self, design, ctx, ops=None):
+        """Units each tech needs (crossbar arrays; bytes for digital local memory)."""
+        ops = ops or self.ops(1, ctx)
+        need = defaultdict(float)
+        for k, _, _, units in self._resident(design, ctx, ops):
+            need[k] += units
+        return {k: {"needed": v, "have": self._have(design, k)} for k, v in need.items()}
+
+    def data_in_pim(self, design, ctx, ops=None) -> "Residency":
+        """D: the bytes resident on the coprocessor at context ctx, per tech and tensor.
+
+        Counts exactly what `capacity` counts: static weights (and the LM head) on a
+        crossbar or on a digital/DRAM-PIM tech that keeps weights locally, at
+        weight_bits; K and V of every cached layer at kv_bits when attention runs on
+        the coprocessor. Activations, the embedding table and host-resident data are
+        not counted. `occupied` adds crossbar padding (whole arrays), so a tech is over
+        capacity exactly when occupied > capacity, the same test as `capacity`.
+        """
+        ops = ops or self.ops(1, ctx)
+        tensors = defaultdict(lambda: defaultdict(float))
+        occupied = defaultdict(float)
+        for k, tensor, nbytes, units in self._resident(design, ctx, ops):
             name, _, unit = k.partition(":")
-            t = self.lib[name]
-            if unit == "bytes":
-                have = t.p("local_mem_bytes", float("inf")) * (
-                    design.units.get(name, 1) if t.p("mem_scales_with_units", False) else 1)
-            else:
-                have = design.units.get(name, 0)
-            cap[k] = {"needed": v, "have": have}
-        return cap
+            tensors[name][tensor] += nbytes
+            occupied[name] += units * (1 if unit == "bytes" else _array_bytes(self.lib[name]))
+        cap = {}
+        for name in occupied:
+            k = name if self.lib[name].kind == "crossbar" else name + ":bytes"
+            have = self._have(design, k)
+            cap[name] = have * (1 if k.endswith(":bytes") else _array_bytes(self.lib[name]))
+        return Residency(ctx=ctx, tensors={n: dict(v) for n, v in tensors.items()},
+                         occupied=dict(occupied), capacity=cap)
 
     def capacity_over(self, design, ctx):
         return any(c["needed"] > c["have"] for c in self.capacity(design, ctx).values())
