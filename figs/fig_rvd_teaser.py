@@ -107,7 +107,7 @@ def main():
           f"Domeline {D['total'][np.searchsorted(CTX, 16384)]:.3f}")
 
     fs.apply()
-    fig, (a, b) = plt.subplots(1, 2, figsize=(fs.COL_W, 2.05), sharey=True)
+    fig, (a, b) = plt.subplots(1, 2, figsize=(fs.COL_W, 2.35), sharey=True)
     x = CTX / 1024
     for ax, data, keys, title in (
             (a, R, ("xbar", "star", "host"), "(a) Roofline"),
@@ -128,31 +128,23 @@ def main():
     a.yaxis.set_major_formatter(plt.FuncFormatter(lambda v, _: f"{v:g}"))
     a.set_ylabel("Time per decoded token (ms)")
 
-    # Direct labels (ink), placed on each line where it is clear of the others.
-    def at(data, k, xx):
-        return float(np.interp(xx, x, data[k]))
-
-    def lab(ax, xx, yy, text, dy=0, ha="center"):
-        ax.annotate(text, (xx, yy), xytext=(0, dy), textcoords="offset points", ha=ha, va="center",
-                    fontsize=6, color=fs.INK)
-    lab(a, 16, at(R, "total", 16), "total", dy=7, ha="right")
-    lab(a, 16, at(R, "star", 16), "softmax unit", dy=-7, ha="left")
-    lab(a, 2, at(R, "host", 2), "host", dy=-6)
-    lab(a, 4, at(R, "xbar", 4), "crossbar", dy=6)
-    a.annotate("bound: softmax unit\n(compute)", (1.05, 2.5), fontsize=6, color=fs.INK_2, ha="left", va="center",
-               linespacing=1.0)
-    lab(b, 60, D["total"][-1], "total", dy=0, ha="right")
-    lab(b, 4, at(D, "xbar", 4), "crossbar", dy=-6)
-    lab(b, 4, at(D, "transfer", 4), "transfers", dy=6)
-    lab(b, 30, at(D, "star", 30), "softmax unit", dy=-8, ha="right")
-    lab(b, 8, at(D, "host", 8), "host + launch", dy=-6)
-    lab(b, 2, at(D, "write", 2), "writes", dy=-6)
+    # One shared legend (five costs plus the total); a cost keeps its color and dash in both panels.
+    from matplotlib.lines import Line2D
+    handles = [Line2D([], [], color=fs.series(SLOT[k])["color"], ls=fs.series(SLOT[k])["linestyle"], lw=0.9,
+                      label=NAME[k]) for k in ("xbar", "transfer", "star", "write", "host")]
+    handles.append(Line2D([], [], color=fs.INK, lw=1.6, label="Total"))
+    fig.legend(handles=handles, loc="upper center", ncol=3, fontsize=6, frameon=False,
+               bbox_to_anchor=(0.5, 1.0), handlelength=2.2, columnspacing=1.2)
+    a.annotate("bound: softmax unit\nno capacity wall", (1.05, 2.0), fontsize=6, color=fs.INK_2, ha="left",
+               va="center", linespacing=1.1)
     b.axvline(wall / 1024, color=fs.INK_3, lw=0.7, ls=":")
-    b.annotate(f"capacity\nwall {wall / 1024:.0f}K", (wall / 1024, 2.2), xytext=(-2, 0), textcoords="offset points",
+    b.annotate(f"wall\n{wall / 1024:.0f}K", (wall / 1024, 0.0013), xytext=(-2, 0), textcoords="offset points",
                ha="right", va="center", fontsize=6, color=fs.INK_2, linespacing=1.0)
-    a.annotate(f"session: {sn['rf_speedup']:.0f}x vs 3080", (1.05, 9), fontsize=6, color=fs.INK, ha="left")
-    b.annotate(f"session: {sn['dl_speedup']:.1f}x vs 3080", (1.05, 9), fontsize=6, color=fs.INK, ha="left")
-    fig.tight_layout(w_pad=0.6)
+    b.annotate("bound: crossbar,\nthen writes", (1.05, 2.0), fontsize=6, color=fs.INK_2, ha="left",
+               va="center", linespacing=1.1)
+    a.annotate(f"session {sn['rf_speedup']:.1f}× vs 3080", (1.05, 9), fontsize=6, color=fs.INK, ha="left")
+    b.annotate(f"session {sn['dl_speedup']:.1f}× vs 3080", (1.05, 9), fontsize=6, color=fs.INK, ha="left")
+    fig.tight_layout(w_pad=0.6, rect=(0, 0, 1, 0.9))
     print(fs.save(fig, "rvd_teaser"))
 
 
