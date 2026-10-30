@@ -18,7 +18,20 @@ from common import ROOT, gpu, library, model, sessions, split
 from harness.evaluate import Evaluator
 from harness.space import Space
 
-# GB/s, dense fp16 tensor TFLOPS (fp32 accumulate). VERIFY against vendor sheets.
+# GB/s, dense (no sparsity) fp16 tensor TFLOPS with fp32 accumulate. Checked Oct 29, 2026:
+#   RTX 3080: NVIDIA Ampere GA102 whitepaper v1, Table 2: 760 GB/s; FP16 Tensor 59.5/119 TFLOPS
+#     (dense/sparse) with FP32 accumulate, 119/238 with FP16 accumulate; INT8 238/476 TOPS.
+#     https://images.nvidia.com/aem-dam/en-zz/Solutions/geforce/ampere/pdf/NVIDIA-ampere-GA102-GPU-Architecture-Whitepaper-V1.pdf
+#   RTX 4090: NVIDIA Ada GPU architecture whitepaper, Table 2: 1008 GB/s; FP16 Tensor 165.2/330.4
+#     with FP32 accumulate, 330.3/660.6 with FP16 accumulate; INT8 660.6/1321.2 TOPS.
+#     https://images.nvidia.com/aem-dam/Solutions/geforce/ada/nvidia-ada-gpu-architecture.pdf
+#   H100 SXM: https://www.nvidia.com/en-us/data-center/h100/ : 3.35 TB/s; FP16 Tensor 1,979 TFLOPS
+#     "with sparsity", i.e. 989 dense; data-center parts run FP16 at the same rate with either
+#     accumulator, so the GeForce halving for FP32 accumulate does not apply.
+# The fp32-accumulate column is the consistent one across the three. If llama.cpp's prefill runs
+# at the fp16-accumulate or int8 rate (MMQ for Q8_0), the 3080 and 4090 double and the H100 does
+# not: its prefill ratio drops from 16.6x to 8.3x and the H100 bar rises from 2.52x to 2.54x on
+# the search set, so the choice here is the one generous to the H100.
 GPUS = {
     "RTX 3080": (760.0, 59.5),
     "RTX 4090": (1008.0, 165.2),

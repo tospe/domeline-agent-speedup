@@ -8,7 +8,7 @@ Agentic sessions spend 90% of their time decoding one token at a time over a con
 
 ## Why now (the hook)
 
-- Agents, not chatbots, are the workload that matters: long multi-turn sessions, tool calls, a context that keeps growing. Single-batch decode is memory-bound and the KV cache keeps growing. Consumer GPUs hit a VRAM wall: 8% of our sessions ran out of memory on the 3080 with fp16 KV, and 36% of the late set did.
+- Agents, not chatbots, are the workload that matters: long multi-turn sessions, tool calls, a context that keeps growing. Single-batch decode is memory-bound and the KV cache keeps growing. Consumer GPUs hit a VRAM wall: 11 of the 100 sessions we traced (11%) ran out of memory on the 3080 with fp16 KV: 7 of the 89 in the frozen workload and 4 of the 11 late ones.
 - PIM papers evaluate kernels or single-prompt inference. Nobody designs PIM for the session: the context path, tool gaps, prefill bursts, KV growth.
 - Design-space exploration for accelerators is either brute force over a simulator or an opaque optimizer. Neither explains why a design wins, and simulators make brute force unaffordable.
 
@@ -25,7 +25,7 @@ Agentic sessions spend 90% of their time decoding one token at a time over a con
    - Figures: walk, search efficiency (both panels), sweep (whole space), effort staircase.
 3. **A PIM design for a coding agent.** ReRAM crossbars hold the weights, the LM head and the KV cache (with transposable K writes), a fixed-function nonlinear unit handles softmax and norms, the CPU keeps embedding and sampling, and a CXL-class link connects them.
    - **9.42×** on the search sessions, **9.61×** on the held-out sessions, and **15.4×** on 11 tasks collected after the search (more LLM-bound, higher bound).
-   - Decode takes 0.4–0.8 ms/token from 4K to 64K context, against 7.5–28 ms on the 3080.
+   - Decode takes 0.4–0.8 ms/token from 4K to 64K context, against 7.5–27 ms on the 3080.
    - Sensitivity: only the crossbar read cycle moves the result (7.5–11.0× over ½–2×). It is taken from ISAAC Table I.
    - Figures: trace profile, GPU wall, headline breakdown (`headline`: 21× per token at 4K, 25× at 32K), sensitivity tornado, area front.
 

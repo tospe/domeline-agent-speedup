@@ -49,4 +49,9 @@ python search_compare.py --budget 100 --seeds 0 1 2 --agent-seeds 2 --area-cap 3
 python heldout_extra.py --runs main effort5
 python gpu_scale.py                               # 4090 / H100 bar, scaled from the 3080
 cd .. && for f in figs/fig_*.py; do python $f main; done; python figs/fig_search.py effort5; python figs/fig_search.py area3000
+python experiments/make_numbers.py                # every paper number -> paper/numbers.{tex,json}
+pytest -q tests/test_claims.py                    # main.tex (DOMELINE_TEX) vs paper/claims.yaml
+python experiments/claims.py --report docs/claims_report.md
 ```
+
+Note: `sweep_all.py` enumerates the current 17-knob space (6.7M designs). The 575,400-design sweep in the paper is the 14-knob space with the area knobs at ISAAC's defaults.
