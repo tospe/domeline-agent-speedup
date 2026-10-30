@@ -43,6 +43,8 @@ python effort_sweep.py --tag main
 python sensitivity.py --tag main
 python sweep_all.py --workers 20 --tag main       # all 575,400 designs, ~11 h on 20 cores
 python sweep_analyze.py --tag main --runs main effort5 effort5_haiku
+python roofline_vs_domeline.py --mode ctx --workers 20 --tag main && python rvd_analyze.py --ctx --tag main   # E1 context grid, 14 min
+python roofline_vs_domeline.py --mode session --workers 20 --tag main && python rvd_analyze.py --tag main  # E1, ~3 h
 python area_sweep.py --budget 150 --workers 20 --tag main
 python search_compare.py --budget 100 --seeds 0 1 2 --agent-seeds 2 --area-cap 3000 --tag area3000
 python heldout_extra.py --runs main effort5
