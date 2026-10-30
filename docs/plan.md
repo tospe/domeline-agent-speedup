@@ -14,12 +14,12 @@ Abstract due Nov 11, paper due Nov 18, 2026. The outline is in the Oct 29 note. 
 
 | # | Item | Proposal | Status |
 |---|---|---|---|
-| 1 | Define *D* precisely: which tensors count (weights, LM head, KV), units, and how *D* grows with context along a session | Bytes resident in PIM at context *c*, taken from `Integrator.capacity`; a session is a path along *D* as the KV cache grows | open |
+| 1 | Define *D* precisely: which tensors count (weights, LM head, KV), units, and how *D* grows with context along a session | Bytes resident in PIM at context *c*, taken from `Integrator.capacity`; a session is a path along *D* as the KV cache grows | done (Oct 29 overnight): `docs/theory.md` §1, `Integrator.data_in_pim`; weights at w_b + LM head if offloaded + K,V at k_b if attention is offloaded; 147 KB/token at fp16 KV |
 | 2 | Rename the axis in Definition 1, `figures/`, `fig_domeline*` and the text | Use *D* everywhere | open (after 1) |
 | 3 | Define the Roofline baseline for E1 | Per op, max(flops/peak, bytes/BW) on the device the op is mapped to (`tech.roofline_time`), summed. No host, link, writes or wall. Its bottleneck is the slowest device and whether it is compute- or bandwidth-bound. Main variant leaves host ops out; a second variant puts them on the host roof. | decided (Oct 29) |
-| 4 | Headroom: compute it or drop it from C1 | Compute it in `evaluate.py`: the gap from the binding term to the next term, and the margin in *D* to the capacity wall | decided (Oct 29, overnight): compute it; easy to drop from the text |
-| 5 | Show that Roofline and VIPER are special cases | Write the reduction (below the wall, no host, no link gives Roofline; one offloaded kernel gives VIPER) and check that the integrator agrees, including the launch terms | open |
-| 6 | Harness interface: four explicit inputs | Workload, technology library, host profile (now implicit: τ and `results/cpu/cpu_ops.tsv`), objective (latency only, stated as such). Policy is a plug-in, per the decision above. | open |
+| 4 | Headroom: compute it or drop it from C1 | Compute it in `evaluate.py`: the gap from the binding term to the next term, and the margin in *D* to the capacity wall | done (Oct 29 overnight): `Eval.term_headroom` (binding / second term) and `Eval.capacity_headroom_bytes` (min over techs of capacity − occupied at the longest context); `docs/theory.md` §2; easy to drop from the text |
+| 5 | Show that Roofline and VIPER are special cases | Write the reduction (below the wall, no host, no link gives Roofline; one offloaded kernel gives VIPER) and check that the integrator agrees, including the launch terms | done with caveats (Oct 29 overnight): `docs/theory.md` §3, `tests/test_special_cases.py`. VIPER exact below the wall; past it the integrator adds overflow reprogramming once, not ⌈D/C⌉ passes, so Definition 1 must change or be called schematic. Roofline is per-op and exact on one roofline-kind device, plus one launch and per-op overhead |
+| 6 | Harness interface: four explicit inputs | Workload, technology library, host profile (now implicit: τ and `results/cpu/cpu_ops.tsv`), objective (latency only, stated as such). Policy is a plug-in, per the decision above. | done (Oct 29 overnight): `harness/inputs.py` (`Inputs`, `HostProfile`, `run`), `docs/harness.md` §8 |
 
 ### Experiments
 

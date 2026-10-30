@@ -89,7 +89,8 @@ VIPER's closed form, generalized to many ops, many technologies, and a whole ses
 These come from the integrator's breakdown:
 
 - the binding term at each L;
-- the headroom to every other term;
+- the headroom: term headroom (binding term / second-largest term) and capacity headroom (bytes the design can hold minus bytes held at the longest context); defined in `docs/theory.md` §2;
+- *D*, the data held in PIM, along the session path (`docs/theory.md` §1);
 - the Amdahl bound (tool time plus the CPU ops that cannot be offloaded);
 - the GPU sheet (3080 time for the same work).
 
@@ -147,3 +148,31 @@ Pick from data. Measure the tool share on about 5 sessions of each first. The wo
 3. **Domeline readings:** the binding term, the headroom, the Amdahl bound, the GPU sheet.
 4. **Agent loop:** budgets, moves, the decision log. Then the baselines: random search, Bayesian optimization, a sweep on a subspace.
 5. **gem5 hook:** a design is turned into accelerator parameters and run for one layer.
+
+## 8. Interface: four inputs, a pluggable policy, one output (Oct 29)
+
+Code: `harness/inputs.py` (`Inputs`, `HostProfile`, `run`). It only composes the existing pieces; an evaluator built through it gives the same log as one built by hand (`tests/test_readings.py::test_inputs_match_hand_built`).
+
+### Inputs
+
+| Input | What it is | Where it enters |
+|---|---|---|
+| **Workload** | Traces (one `Session` per agent run: per turn `ctx_start`, `prefill_tokens`, `gen_tokens`, tool time τ) and the op graph source (the model's `config.json`, read into a `ModelSpec`; `ops.forward_ops` builds G(n, L) from it) | `Inputs.model`, `Inputs.sessions`; `session.load_trace`, `ModelSpec.from_hf_config` |
+| **Technology library** | Coprocessor technologies, one YAML entry each, every number cited (`lib/tech/pim.yaml`) | `Inputs.library`; `tech.load_library` |
+| **Host profile** | The host CPU: its per-op cost model (the `cpu` entry of `lib/tech/host.yaml`, which points at the measured profile `results/cpu/cpu_ops.tsv` at 8 threads, with a roofline fallback and a 1 µs per-op overhead), and the host on which the tool times τ were measured | `Inputs.host` = `HostProfile.load(path, name, profile_tsv, threads, tool_scale)` |
+| **Objective** | Latency only: workload time Σ_s T_s(d) (LLM + tools), ∞ if the design is infeasible (wall inside the workload, or over the area or effort cap). Energy and area are not objectives; area and effort are constraints. | `Inputs.objective = "latency"` (anything else raises); `Eval.objective` |
+
+Before Oct 29 the host profile was implicit: the host was the library entry named by the string `Space(host="cpu")`, loaded with the coprocessor techs from `lib/tech/`, and τ was only a field of the traces. `HostProfile` makes it one object: `tech` is the host's cost model (swap `host.yaml` or `profile_tsv` for another host), and `tool_scale` rescales τ for a host other than the traced one (1.0, the default, leaves the sessions untouched). τ stays in the traces because it is measured per turn; the host profile says which host it belongs to. `Inputs.lib()` merges the library and the host entry, and refuses a library entry with the host's name that differs from it. The experiments still load `lib/tech/` whole, which is the same library.
+
+### Policy
+
+A policy is any callable `policy(evaluator)`. It asks the evaluator for design points (`ev(point) -> Eval`) until it is done or `BudgetExhausted` is raised; each distinct design costs one evaluation whoever asks. Policies that may read the Domeline read the `Eval` readings (terms, by-kind times, binding and second term, term headroom, D, capacity headroom, wall context); scalar policies read only `time_s` and `feasible`. Implemented: `search.domeline_walk` (reads the binding term), `search.hill_climb`, `search.random_search`, `search.tpe_search`, `search.sweep`, and `agent.agent_search` (an LLM agent, with or without the readings). An LLM agent is one policy among these, not part of the harness.
+
+### Output
+
+`run(inputs, policy, gpu, budget, area_cap_mm2=..., effort_cap_months=...)` returns a `Result`:
+
+- `best`: the chosen point, the smallest design within 1% of the fastest feasible one (`Evaluator.best`, the same rule for every policy), with its readings;
+- `design`: its `Design` (mapping, units, link, precisions);
+- `log`: every evaluation in order, each an `Eval` with its readings;
+- `trail`: what the policy returned; for the walk, a `Trail` whose steps pair each accepted move with the reading that justified it, and the stopping reason.

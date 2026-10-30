@@ -2,7 +2,7 @@
 
 A harness that designs a processing-in-memory (PIM) coprocessor for an agentic workload, guided by Domeline. The coprocessor sits next to a CPU, VIPER's task-offloading mode. The case study is a coding agent (mini-swe-agent + mini-coder-4b on SWE-bench Verified), and the bar is an RTX 3080 running the same sessions.
 
-Design notes: `docs/harness.md`. Run log, decisions and status: `docs/autopilot.md`.
+Design notes: `docs/harness.md`; *D*, headroom and the special cases: `docs/theory.md`. Run log, decisions and status: `docs/autopilot.md`.
 
 ## Layout
 
@@ -12,10 +12,11 @@ Design notes: `docs/harness.md`. Run log, decisions and status: `docs/autopilot.
 | `harness/ops.py` | Op graph for one forward step (decode or prefill) with the activation tensors each op reads and writes |
 | `harness/tech.py` | Technology cost models (crossbar, tiled GEMV, digital unit, DRAM-PIM, CPU with measured profile) and the YAML loader |
 | `harness/design.py` | A design: op -> technology mapping, units, link, precisions |
-| `harness/integrator.py` | One step's time, split into Domeline terms (host, per-tech compute, transfer, launch, write), plus capacity |
+| `harness/integrator.py` | One step's time, split into Domeline terms (host, per-tech compute, transfer, launch, write), plus capacity and *D*, the data held in PIM (`data_in_pim`) |
 | `harness/session.py` | Session replay over a trace; GPU baseline from measurements |
 | `harness/space.py` | The design space (17 knobs: 14 mapping/sizing knobs plus 3 sourced area knobs), area and effort |
-| `harness/evaluate.py` | Budgeted evaluator; Domeline readings for each evaluated design |
+| `harness/evaluate.py` | Budgeted evaluator; Domeline readings for each evaluated design (terms, term and capacity headroom, *D*) |
+| `harness/inputs.py` | The harness interface: workload, technology library, host profile, objective (latency); `run(inputs, policy, ...)` |
 | `harness/search.py` | Domeline walk, hill climbing, random search, TPE, sweeps |
 | `harness/agent.py` | LLM agent searcher (`claude -p` or a local llama-server), with or without the readings |
 | `harness/figstyle.py` | One figure style (IEEE column/page widths, validated palette) |
@@ -25,7 +26,7 @@ Design notes: `docs/harness.md`. Run log, decisions and status: `docs/autopilot.
 | `traces/run_swebench.py` | Agent runner that logs per-turn traces (context, prefill/decode times, tool times) |
 | `experiments/` | Search comparison, effort staircase, sensitivity, exhaustive sweep and its analysis, iso-area study, second held-out set |
 | `figs/` | One script per figure; figures land in `figures/` |
-| `tests/` | Reproduction of TERINT-GEMV's estimator; fast replay vs exact replay |
+| `tests/` | Reproduction of TERINT-GEMV's estimator; fast replay vs exact replay; *D* and headroom; the VIPER and Roofline special cases |
 
 ## Reproduce
 
