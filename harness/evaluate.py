@@ -13,7 +13,7 @@ from typing import Dict, List, Optional
 
 from .integrator import Integrator
 from .session import GpuBaseline, WorkloadReplayer
-from .space import Space, canonical, key
+from .space import Space
 
 
 class BudgetExhausted(Exception):
@@ -76,13 +76,13 @@ class Evaluator:
         return min(near, key=lambda e: (e.area_mm2, e.effort_months, e.time_s))
 
     def __call__(self, point) -> Eval:
-        k = key(point)
+        k = self.space.key(point)
         if k in self.cache:
             return self.cache[k]
         if self.used >= self.budget:
             raise BudgetExhausted()
         t0 = time.time()
-        p = canonical(point)
+        p = self.space.canonical(point)
         design, lib = self.space.to_design(p)
         integ = Integrator(self.space.model, lib)
         integ._ops_cache = self._base._ops_cache

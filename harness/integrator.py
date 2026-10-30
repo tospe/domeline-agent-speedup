@@ -151,8 +151,11 @@ class Integrator:
             if xfer_bytes:
                 flush_group()
                 n_units = design.units.get(tname, 0) if t.p("host_scatter", False) else 0
-                terms["transfer"] += (link.t0_s + link.alpha_s_per_unit * n_units
-                                      + xfer_bytes / link.bw_Bps)
+                # A tech may carry its own measured transfer law (UPMEM: t0 + alpha * N);
+                # otherwise the link's applies.
+                t0 = t.p("xfer_t0_s", link.t0_s)
+                alpha = t.p("xfer_s_per_unit", link.alpha_s_per_unit)
+                terms["transfer"] += t0 + alpha * n_units + xfer_bytes / link.bw_Bps
                 crossings += 1
                 link_bytes += xfer_bytes
             if noc_bytes:
