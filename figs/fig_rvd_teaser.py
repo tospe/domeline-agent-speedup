@@ -99,7 +99,7 @@ def main():
     sn = session_numbers(space, tr, g, p)
     sf = session_numbers(space, tr, g, canonical({**START, **FULL}))
     print(f"design 0.75x: Domeline {sn['dl_speedup']:.2f}x (wall {sn['wall']}), Roofline {sn['rf_speedup']:.2f}x, "
-          f"{sn['area']:.0f} mm2; full-size: Domeline {sf['dl_speedup']:.2f}x, Roofline {sf['rf_speedup']:.2f}x, "
+          f"{sn['area']:.0f} mm2, LLM time Roofline {sn['rf_llm']:.1f} s vs Domeline {sn['dl_llm']:.1f} s; full-size: Domeline {sf['dl_speedup']:.2f}x, Roofline {sf['rf_speedup']:.2f}x, "
           f"{sf['area']:.0f} mm2")
     i64 = len(CTX) - 1
     print(f"at 64K: Roofline {R['total'][i64]:.3f} ms, Domeline {D['total'][i64]:.3f} ms "
