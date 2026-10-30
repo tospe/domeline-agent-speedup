@@ -29,8 +29,8 @@ Abstract due Nov 11, paper due Nov 18, 2026. The outline is in the Oct 29 note. 
 | 8 | E1 along the session path: the same comparison at 4K/16K/32K/64K context (minutes) | done Oct 29 (14 min, + 128K and a 16K prefill chunk): host-roof Roofline agrees 94–99% and Spearman 0.96–0.998 inside the workload; disagreement is in the top 1% (agree 20–67%, time 2.5–4× optimistic) and past the wall (128K: 70%, top 10%: 33%). `results/search/rvd_ctx_main.json` |
 | 9 | E2: pick the strongest disagreement (a design that crosses the wall mid-session, or attention over the KV cache) and draw Fig. 1 | draft Oct 29: headline design at 0.75x crossbar, wall at 35K mid-session; Roofline 15.5x (same as full size), Domeline 8.46x; 0.10 vs 4.2 ms/token at 64K. `figs/fig_rvd_teaser.py` |
 | 10 | Fallback: decide by Nov 2 whether to lead with what Roofline cannot express (wall, writes, Amdahl bound) | triggered by E1 (Oct 29): over all feasible designs Roofline mostly agrees. Lead with: top-1% disagreement, the 18-way tie it cannot break (writes, link, 3.1x area), the wall (E2) |
-| 11 | E8, a second technology library or host profile: only if E1 is done by Nov 3 | optional |
-| 12 | Walk figure fixes (binding-term outline, area path, CVD clash, label placement, low-gain moves) | open |
+| 11 | E8, a second technology library or host profile: only if E1 is done by Nov 3 | run (Oct 29, overnight): `experiments/generality.py`, results.md "Generality (E8)"; AiM numbers VERIFY; in the paper only if E1 is done by Nov 3 |
+| 12 | Walk figure fixes (binding-term outline, area path, CVD clash, label placement, low-gain moves) | done (Oct 29, overnight): `figs/fig_walk.py` |
 
 ### Numbers to reconcile
 

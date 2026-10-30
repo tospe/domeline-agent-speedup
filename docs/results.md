@@ -158,6 +158,34 @@ Not measured. Each session's measured 3080 time is split into decode, prefill an
 
 The design still beats a data-center H100 by 2.5× on session time. The H100 bound is close to its Amdahl ceiling because tools are 6% of 3080 time and the H100 shrinks decode 4.4×.
 
+## Generality (E8, `experiments/generality.py --budget 100 --workers 4 --tag main`)
+
+Same workload (45 search / 44 held-out sessions), same 17 knobs, same searchers, budget 100; walk once (deterministic), TPE and random over seeds 0–2. Only the harness inputs change. Output: `results/search/generality_main.json` (21 runs, ~20 min on 4 workers).
+
+| Config | Walk | TPE (3 seeds) | Random (3 seeds) |
+|---|---|---|---|
+| **main**: `lib/tech`, measured host profile (reference, current code) | 9.42× at eval 28 (31 evals) | 9.46 / 9.42 / 8.53× at 100 / 88 / 64 | 4.71 / 2.45 / 7.43× |
+| **dram**: crossbars removed; MVM role filled by DRAM-PIM (UPMEM or GDDR6-AiM) | 5.22× at eval 23 (29 evals), AiM | 5.24 / 5.23 / 5.24× at 93 / 80 / 65, AiM | 3.07 / 1.25 / 3.89×, AiM |
+| **host_roof**: `lib/tech`, host = `cpu_roofline` (datasheet roofline, no measured profile) | 9.42× at eval 22 (25 evals) | 9.48 / 9.01 / 9.46× at 73 / 61 / 78 | 4.95 / 2.45 / 7.43× |
+
+Held-out speedups track the search set in every run (within ±0.2×). Walk trails are in the JSON.
+
+What this supports:
+1. **The harness runs unchanged on a second library.** With the crossbars removed, the walk reads the same way: transfer binds (69%) → softmax and norms off the host; host binds → attention to the MVM tech; `upmem_dpu` binds (93%) → more DPUs (2,560 → 4,096), which reaches only 0.11×; still `upmem_dpu` binds → the other MVM tech (AiM), 0.85×; then LM head, nonlinear and vector-unit sizing up to 5.22×. It stops with `aim_gddr6` binding at 86% of LLM time and no move left (the unit-count knob is at its top). It lands within 0.4% of TPE's best in a third of the evaluations; random search reaches 1.3–3.9×.
+2. **UPMEM is rejected, as expected** (`lib/tech/pim.yaml` says so): with its measured transfer law (1.82 ms + 1.68 µs × N per offload) and 96 MOPS per DPU it never passes 0.11× of the 3080, and the readings say why (DPU compute, then transfer).
+3. **A second host profile changes the path, not the answer.** On the roofline host the host-bound start design is 0.12× instead of 0.04× (the datasheet roofline is about 3× faster than the measured host on the ops left there), the walk takes 8 speed moves instead of 12 (it never routes norms through the vector unit) and lands on the same design (9.42×, 9,729 mm², 7 months) in 25 evaluations instead of 31. TPE needs 61–100 evaluations and one seed stops at 9.01×.
+
+Caveats (state them if E8 goes in the paper):
+- **The DRAM-PIM numbers are mostly not checked.** UPMEM (`lib/tech/pim.yaml`) is measured silicon (VIPER case study: 48 MOPS int8 MAC/DPU, transfer law), but its MRAM bank bandwidth is marked VERIFY. Every AiM number (`lib/tech_dram/aim.yaml`: 1 TFLOPS and 1 TB/s internal per 1 GB chip, 100 ns per-op overhead) is recalled from Kwon et al., ISSCC 2022, and marked VERIFY; the per-op overhead is our assumption.
+- AiM computes in BF16, but the harness charges weights and KV at int8/fp16 (the design's precision), which flatters AiM's traffic by up to 2×.
+- DRAM-PIM area is 0 by convention (memory dies, not logic), so area and the shrink phase are not meaningful for the dram config; compare speed only.
+- DRAM-PIM sizing is a new assumption: `xbar_scale` sizes the MVM tech relative to max(units its memory needs, `units_ref`), with `units_ref` 2,048 DPUs (so 1.25× = the measured 2,560-DPU server) and 8 AiM chips. The dram optimum (5.2×, 20 chips) sits at the top of the knob range; a wider range would go further, so 5.2× is not a bound for DRAM-PIM.
+- The UPMEM transfer law is charged on transfers into the DPUs only (as in the integrator's VIPER form), not on the gather back.
+- The roofline host is a datasheet-level profile of the same i9-12900K, not a second machine; "second host" here means a second host *model*.
+- The "main" row is a rerun with the current 17-knob code. The `search_compare.py --tag main` numbers in the table above predate the three area knobs; walk and its final design match, the baselines differ (TPE 8.53–9.46× here vs 9.46–9.48× there, random seed 0 4.71× vs 8.15×).
+
+Code changes this needed (main-library results unchanged; walk and random seed 0 reproduce bit-for-bit against the previous commit): `Space` maps the `xbar_tech` knob to any library tech (`mvm_techs`) and sizes non-crossbar MVM techs as above; the evaluator dedupes through `Space.key` (crossbar area knobs are inert for DRAM-PIM); the walk gets a generic rule for a binding unit tech it has no specific rule for (more units, or the other MVM tech); a tech may carry its own transfer law (`xfer_t0_s`, `xfer_s_per_unit`).
+
 ## Open questions for the authors
 
 - **Area** is the weak point: ~15× the 3080's die at ISAAC 32 nm. Denser cells, larger arrays and node scaling are knobs worth adding with sourced numbers.

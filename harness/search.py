@@ -152,8 +152,13 @@ def proposals(e: Eval):
             down(why + "; read cycle set by ADC sharing", "adc_per_ima")
             if p["attention"] == "xbar":
                 add(why + "; attention reads grow with context", "attention", "vfu")
-        elif term == "host" or term not in ("link",):
-            pass
+        elif term not in ("host", "link"):
+            # Any other unit-count tech (e.g. a DRAM-PIM MVM tech from a second library):
+            # more units, or the other tech for the MVM role.
+            if ACTIVE_IF["xbar_scale"](p):
+                up(why + "; more units", "xbar_scale")
+            for alt in KNOBS["xbar_tech"]:
+                add(why + "; other MVM tech", "xbar_tech", alt)
     seen, uniq = set(), []
     for why, knob, val in out:
         q = {**p, knob: val}

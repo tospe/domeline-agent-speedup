@@ -21,6 +21,7 @@ Design notes: `docs/harness.md`; *D*, headroom and the special cases: `docs/theo
 | `harness/agent.py` | LLM agent searcher (`claude -p` or a local llama-server), with or without the readings |
 | `harness/figstyle.py` | One figure style (IEEE column/page widths, validated palette) |
 | `lib/tech/*.yaml` | Technology library; every entry cites its source, and uncertain numbers are marked VERIFY |
+| `lib/tech_dram/*.yaml` | Extra DRAM-PIM entries for the generality experiment (E8) only |
 | `gpu/g1_sweep.sh`, `gpu/g2_sweep.sh` | RTX 3080 decode time vs context and KV precision; past the VRAM wall with KV in host memory |
 | `profile/cpu_ops.c` | Host CPU per-op profile at mini-coder-4b shapes |
 | `traces/run_swebench.py` | Agent runner that logs per-turn traces (context, prefill/decode times, tool times) |
@@ -50,6 +51,7 @@ python area_sweep.py --budget 150 --workers 20 --tag main
 python search_compare.py --budget 100 --seeds 0 1 2 --agent-seeds 2 --area-cap 3000 --tag area3000
 python heldout_extra.py --runs main effort5
 python gpu_scale.py                               # 4090 / H100 bar, scaled from the 3080
+python generality.py --budget 100 --workers 4     # E8: DRAM-PIM library, roofline host profile
 cd .. && for f in figs/fig_*.py; do python $f main; done; python figs/fig_search.py effort5; python figs/fig_search.py area3000
 python experiments/make_numbers.py                # every paper number -> paper/numbers.{tex,json}
 pytest -q tests/test_claims.py                    # main.tex (DOMELINE_TEX) vs paper/claims.yaml

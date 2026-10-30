@@ -12,7 +12,7 @@ every number is a knob value the user can change.
 import itertools
 import math
 from dataclasses import dataclass
-from typing import Dict, List
+from typing import Dict, List, Optional
 
 from .design import Design, Link
 from .ops import forward_ops
@@ -119,17 +119,50 @@ def n_designs():
     return total, distinct
 
 
+XBAR_AREA_KNOBS = ("xbar_tile", "adc_per_ima", "cell_bits")
+
+
 @dataclass
 class Space:
+    """The design space over one technology library and one host profile.
+
+    The knobs keep their crossbar names, but the roles are generic: `xbar_tech`
+    picks the tech that runs the weight MVMs (and attention when mapped there),
+    `xbar_scale` sizes it. `mvm_techs` maps each `xbar_tech` option to a library
+    tech, so a second library (e.g. DRAM-PIM) can fill the role. A non-crossbar
+    MVM tech is sized relative to max(units its memory needs, its `units_ref`
+    param); the crossbar area knobs do not apply to it and are reset.
+    `links` overrides the link presets (e.g. a measured DIMM link).
+    """
     lib: Dict
     model: object
     ref_ctx: int
     host: str = "cpu"
     vfu: str = "vfu_puma"
     star: str = "softmax_star"
+    mvm_techs: Optional[Dict[str, str]] = None
+    links: Optional[Dict[str, Link]] = None
+
+    def mvm_tech(self, p):
+        return (self.mvm_techs or {}).get(p["xbar_tech"], p["xbar_tech"])
+
+    def _crossbar(self, p):
+        return self.lib[self.mvm_tech(p)].kind == "crossbar"
+
+    def canonical(self, p):
+        """canonical(p), also resetting the crossbar area knobs when the MVM tech is not a crossbar."""
+        q = canonical(p)
+        if not self._crossbar(q):
+            for k in XBAR_AREA_KNOBS:
+                q[k] = START[k]
+        return q
+
+    def key(self, p):
+        q = self.canonical(p)
+        return tuple(q[k] for k in KNOBS)
 
     def _mapping(self, p):
-        xb = p["xbar_tech"]
+        xb = self.mvm_tech(p)
         tech = {"xbar": xb, "cpu": self.host, "vfu": self.vfu, "star": self.star}
         m = {}
         for k in WEIGHT_MVMS:
@@ -146,11 +179,11 @@ class Space:
 
     def xbar_lib(self, p):
         """The library with the crossbar tech adjusted by the area knobs (tile, ADCs, cell bits)."""
-        p = canonical(p)
+        p = self.canonical(p)
         if not ACTIVE_IF["xbar_tile"](p) or (p["xbar_tile"], p["adc_per_ima"], p["cell_bits"]) == ("isaac", 8, 2):
             return self.lib
         lib = dict(self.lib)
-        x = lib[p["xbar_tech"]]
+        x = lib[self.mvm_tech(p)]
         area = x.area_mm2_per_unit - ADC_PER_XBAR_MM2 * (1 - p["adc_per_ima"] / 8)
         if p["xbar_tile"] == "lean":
             area -= EDRAM_BUS_PER_XBAR_MM2
@@ -158,7 +191,7 @@ class Space:
         if p["cell_bits"] == 4:
             area *= CELL4_AREA_X
             params.update(bits_per_cell=4, t_write_row_s=CELL4_T_WRITE_ROW_S)
-        lib[p["xbar_tech"]] = type(x)(**{**x.__dict__, "area_mm2_per_unit": area, "params": params})
+        lib[self.mvm_tech(p)] = type(x)(**{**x.__dict__, "area_mm2_per_unit": area, "params": params})
         return lib
 
     def xbar_need(self, p, ctx=None):
@@ -167,13 +200,19 @@ class Space:
         d = Design(mapping=self._mapping(p), units={}, kv_bits=p["kv_bits"], host=self.host)
         cap = Integrator(self.model, self.xbar_lib(p)).capacity(d, ctx or self.ref_ctx,
                                                         forward_ops(self.model, 1, ctx or self.ref_ctx))
-        return cap.get(p["xbar_tech"], {}).get("needed", 0)
+        tech = self.mvm_tech(p)
+        t = self.lib[tech]
+        if t.kind == "crossbar":
+            return cap.get(tech, {}).get("needed", 0)
+        need = cap.get(tech + ":bytes", {}).get("needed", 0)
+        per_unit = t.p("local_mem_bytes", float("inf")) if t.p("mem_scales_with_units", False) else float("inf")
+        return max(math.ceil(need / per_unit), t.p("units_ref", 1))
 
     def to_design(self, p) -> Design:
-        p = canonical(p)
+        p = self.canonical(p)
         units = {}
         if ACTIVE_IF["xbar_scale"](p):
-            units[p["xbar_tech"]] = int(math.ceil(p["xbar_scale"] * self.xbar_need(p)))
+            units[self.mvm_tech(p)] = int(math.ceil(p["xbar_scale"] * self.xbar_need(p)))
         units[self.vfu] = p["vfu_units"]
         units[self.star] = p["star_units"]
         lib = self.xbar_lib(p)
@@ -183,25 +222,25 @@ class Space:
             v = lib[self.vfu]
             lib[self.vfu] = type(v)(**{**v.__dict__, "params": {**v.params, "mem_bw_Bps": p["vfu_bw"],
                                                                  "local_mem_bytes": p["vfu_mem"]}})
-        d = Design(mapping=self._mapping(p), units=units, link=LINKS[p["link"]],
+        d = Design(mapping=self._mapping(p), units=units, link=(self.links or LINKS)[p["link"]],
                    kv_bits=p["kv_bits"], host=self.host, label=str(key(p)))
         return d, lib
 
     def area_mm2(self, p):
-        p = canonical(p)
+        p = self.canonical(p)
         d, lib = self.to_design(p)
         used = set(d.mapping.values())
         return sum(lib[t].area_mm2_per_unit * n for t, n in d.units.items() if t in used)
 
     def effort_months(self, p):
-        p = canonical(p)
+        p = self.canonical(p)
         d, lib = self.to_design(p)
         techs = set(d.mapping.values()) - {self.host}
         e = sum(lib[t].effort_months for t in techs)
         e += EFFORT["link"][p["link"]]
         if p["attention"] == "vfu":
             e += EFFORT["vfu_bw"][p["vfu_bw"]]
-        if ACTIVE_IF["xbar_tile"](p):
+        if ACTIVE_IF["xbar_tile"](p) and self._crossbar(p):
             e += EFFORT["xbar_tile"][p["xbar_tile"]] + EFFORT["adc_per_ima"][p["adc_per_ima"]] \
                 + EFFORT["cell_bits"][p["cell_bits"]]
         return e
