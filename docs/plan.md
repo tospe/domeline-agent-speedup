@@ -29,8 +29,8 @@ Abstract due Nov 11, paper due Nov 18, 2026. The outline is in the Oct 29 note. 
 | 8 | E1 along the session path: the same comparison at 4K/16K/32K/64K context (minutes) | open (after 3) |
 | 9 | E2: pick the strongest disagreement (a design that crosses the wall mid-session, or attention over the KV cache) and draw Fig. 1 | open (after 7, 8) |
 | 10 | Fallback: decide by Nov 2 whether to lead with what Roofline cannot express (wall, writes, Amdahl bound) | open |
-| 11 | E8, a second technology library or host profile: only if E1 is done by Nov 3 | optional |
-| 12 | Walk figure fixes (binding-term outline, area path, CVD clash, label placement, low-gain moves) | open |
+| 11 | E8, a second technology library or host profile: only if E1 is done by Nov 3 | run (Oct 29, overnight): `experiments/generality.py`, results.md "Generality (E8)"; AiM numbers VERIFY; in the paper only if E1 is done by Nov 3 |
+| 12 | Walk figure fixes (binding-term outline, area path, CVD clash, label placement, low-gain moves) | done (Oct 29, overnight): `figs/fig_walk.py` |
 
 ### Numbers to reconcile
 
