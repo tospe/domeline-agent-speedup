@@ -51,3 +51,5 @@ anything that changes a paper claim.
 - M0 regression: `tests/test_m0_repro.py` (~40 s; on autopilot — `git merge autopilot` into your branch).
   Uses `experiments/m0_repro.py` helpers. All four checks reproduce exactly today.
 - Measured: one uncached evaluation on the 45 search sessions = 0.66 s (full replay). The walk = 31 evals, 20 s.
+- LLM backends (decided Nov 2): pin explicit IDs `claude-sonnet-5-5` and `claude-haiku-5-5` (the paper's earlier
+  `sonnet`/`haiku` alias runs are taken to be 5.5), plus the local mini-coder-4b via llama.cpp. Record the ID in every run record.
