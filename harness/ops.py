@@ -23,6 +23,14 @@ KV_APPEND = "kv_append"        # write new K and V entries
 VECTOR = "vector"              # elementwise / reduction (norms, softmax, RoPE, ...)
 GATHER = "gather"              # embedding lookup
 
+# Finer labels (Op.subcls) used by the offload verifier; `cls` stays the cost-model class.
+REDUCTION_NONLINEAR = "reduction_nonlinear"   # softmax, norms, activation
+SAMPLING = "sampling"                         # sample
+SUBCLS = {"softmax": REDUCTION_NONLINEAR, "rmsnorm": REDUCTION_NONLINEAR,
+          "qk_norm": REDUCTION_NONLINEAR, "act": REDUCTION_NONLINEAR, "sample": SAMPLING}
+
+STATIC, DYNAMIC = "static", "dynamic"         # operand roles
+
 ACT_BYTES = 2  # activations in fp16 between ops
 
 
@@ -40,6 +48,50 @@ class Op:
     kv_read_elems: float = 0.0                # KV elements read (scaled by KV precision)
     kv_write_elems: float = 0.0               # KV elements appended
     group: Optional[str] = None               # ops in one group are independent of each other
+    subcls: Optional[str] = None              # reduction_nonlinear | sampling | None
+    precisions: Tuple[int, ...] = ()          # allowed operand bit widths (() = any)
+    operands: Optional[List[Tuple[str, str]]] = None   # (tensor, static|dynamic); None = derived
+
+    def __post_init__(self):
+        if self.operands is None:
+            self.operands = default_operands(self)
+
+
+def weight_tensor(op):
+    """Name of the stored matrix of a static MVM (as Integrator/Residency name it)."""
+    return "lm_head" if op.kind == "lm_head" else "w." + op.kind
+
+
+def default_operands(op):
+    """Inputs of an op: weights and the embedding table static, KV and activations dynamic."""
+    out = []
+    if op.cls == MVM_STATIC:
+        out.append((weight_tensor(op), STATIC))
+    elif op.cls == GATHER:
+        out.append(("w." + op.kind, STATIC))
+    elif op.kind == "attn_score":
+        out.append(("kv.K", DYNAMIC))
+    elif op.kind == "attn_value":
+        out.append(("kv.V", DYNAMIC))
+    return out + [(t, DYNAMIC) for t, _ in op.reads]
+
+
+def kv_layer_ids(spec):
+    """Layers that keep a KV cache (hybrid models: spread evenly, e.g. 1 in 4)."""
+    ids = set(range(spec.layers))
+    if spec.kv_layers is not None and spec.kv_layers < spec.layers:
+        step = spec.layers / spec.kv_layers
+        ids = {int(i * step + step - 1) for i in range(spec.kv_layers)}
+    return ids
+
+
+def ops_for(model, n_new=1, ctx=1, logits_tokens=None):
+    """The op list of `model`: its own graph if it has one (a harness.workload.Workload),
+    else the built-in transformer graph below."""
+    gen = getattr(model, "forward_ops", None)
+    if gen is not None:
+        return gen(n_new, ctx, logits_tokens)
+    return forward_ops(model, n_new, ctx, logits_tokens)
 
 
 def _rmsnorm_flops(S, dim):
@@ -57,16 +109,13 @@ def forward_ops(spec, n_new=1, ctx=1, logits_tokens=None):
 
     def add(**kw):
         kw.setdefault("tokens", S)
+        kw.setdefault("subcls", SUBCLS.get(kw["kind"]))
         ops.append(Op(**kw))
 
     add(name="embed", kind="embed", cls=GATHER, layer=None, flops=0,
         writes=[("x", S * D * a)])
 
-    kv_layer_ids = set(range(spec.layers))
-    if spec.kv_layers is not None and spec.kv_layers < spec.layers:
-        # Hybrid models: spread the cached layers evenly (e.g. 1 in 4).
-        step = spec.layers / spec.kv_layers
-        kv_layer_ids = {int(i * step + step - 1) for i in range(spec.kv_layers)}
+    kv_layers = kv_layer_ids(spec)
 
     for l in range(spec.layers):
         p = f"L{l}."
@@ -84,7 +133,7 @@ def forward_ops(spec, n_new=1, ctx=1, logits_tokens=None):
         add(name=p + "rope", kind="rope", cls=VECTOR, layer=l, flops=6 * S * dh * (H + Hkv),
             reads=[(p + "q", S * qd * a), (p + "k", S * kvd * a)],
             writes=[(p + "q", S * qd * a), (p + "k", S * kvd * a)])
-        if l in kv_layer_ids:
+        if l in kv_layers:
             add(name=p + "kv_append", kind="kv_append", cls=KV_APPEND, layer=l, flops=0,
                 reads=[(p + "k", S * kvd * a), (p + "v", S * kvd * a)],
                 kv_write_elems=2 * S * kvd)

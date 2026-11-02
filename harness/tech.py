@@ -26,6 +26,29 @@ class Tech:
     effort_months: float = 0.0
     area_mm2_per_unit: float = 0.0
     notes: str = ""
+    precisions: tuple = ()        # operand bit widths it supports (() = any)
+    sources: Dict = field(default_factory=dict)   # number -> its source ("VERIFY: ..." if none)
+
+    @property
+    def write_mechanism(self):
+        """Can it rewrite its stored matrix per token. params.write_mechanism if given; else a
+        crossbar can iff it has a row-write time, and every other kind can."""
+        w = self.params.get("write_mechanism")
+        if w is not None:
+            return bool(w)
+        return self.p("t_write_row_s") is not None if self.kind == "crossbar" else True
+
+    def supports_precision(self, bits):
+        return not self.precisions or bits in self.precisions
+
+    def unsourced(self):
+        """Numbers of this entry (area, effort, numeric params) with no `sources` entry or a
+        VERIFY one: what still needs a real source."""
+        nums = {"area_mm2_per_unit": self.area_mm2_per_unit, "effort_months": self.effort_months,
+                **{k: v for k, v in self.params.items()
+                   if isinstance(v, (int, float)) and not isinstance(v, bool)}}
+        return sorted(k for k in nums
+                      if not self.sources.get(k) or str(self.sources[k]).startswith("VERIFY"))
 
     @property
     def on_host(self):
@@ -105,15 +128,18 @@ def unit_rates(tech, units, cls):
 class CpuProfile:
     """Per-op seconds measured by profile/cpu_ops.c, interpolated in context length."""
 
-    def __init__(self, path, threads):
+    def __init__(self, path=None, threads=8, by_kind=None):
+        """From the TSV at `path` (rows for `threads`), or from by_kind: kind -> [(ctx, s)]."""
         import numpy as np
-        rows = [l.rstrip("\n").split("\t") for l in Path(path).read_text().splitlines()[1:]]
-        by_kind = {}
-        for kind, ctx, th, sec in rows:
-            if int(th) == int(threads):
-                by_kind.setdefault(kind, []).append((int(ctx), float(sec)))
+        if by_kind is None:
+            rows = [l.rstrip("\n").split("\t") for l in Path(path).read_text().splitlines()[1:]]
+            by_kind = {}
+            for kind, ctx, th, sec in rows:
+                if int(th) == int(threads):
+                    by_kind.setdefault(kind, []).append((int(ctx), float(sec)))
         if not by_kind:
             raise ValueError(f"no rows for {threads} threads in {path}")
+        self.by_kind = {k: sorted(v) for k, v in by_kind.items()}
         self.curves = {k: (np.array([c for c, _ in sorted(v)], float),
                            np.array([s for _, s in sorted(v)], float)) for k, v in by_kind.items()}
         n = 64 << 20
@@ -136,6 +162,9 @@ _PROFILES = {}
 
 
 def cpu_profile(tech):
+    inline = tech.p("profile")         # a CpuProfile built from a host profile file
+    if inline is not None:
+        return inline
     path = tech.p("profile_tsv")
     if not path:
         return None
@@ -171,6 +200,8 @@ def load_library(paths) -> Dict[str, Tech]:
                 effort_months=float(e.pop("effort_months", 0.0)),
                 area_mm2_per_unit=float(e.pop("area_mm2_per_unit", 0.0)),
                 notes=e.pop("notes", ""), params=_floats(e.pop("params", {})),
+                precisions=tuple(int(b) for b in e.pop("precisions", ())),
+                sources=dict(e.pop("sources", {}) or {}),
             )
             if e:
                 raise ValueError(f"unknown fields for tech {name!r}: {sorted(e)}")
