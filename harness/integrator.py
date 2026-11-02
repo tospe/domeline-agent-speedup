@@ -125,8 +125,9 @@ class Integrator:
         the tech name (units = crossbar arrays) or "<tech>:bytes" (units = bytes of local
         memory). Logical bytes are the tensor at its precision, before array padding.
         """
-        spec, wb, kb = self.model, design.weight_bits, design.kv_bits
+        spec, wb = self.model, design.weight_bits
         for op in ops:
+            kb = design.kv_bits_for(op)
             t = self.lib[design.tech_for(op)]
             if t.kind == "crossbar":
                 if op.cls == O.MVM_STATIC:
@@ -297,7 +298,7 @@ class Integrator:
     # -- per-op cost -----------------------------------------------------------
 
     def _op_time(self, op, t: Tech, design, ctx, over, cap):
-        spec, wb, kb = self.model, design.weight_bits, design.kv_bits
+        spec, wb, kb = self.model, design.weight_bits, design.kv_bits_for(op)
         units = design.units.get(t.name, 1)
         group = spec.heads // spec.kv_heads
 
