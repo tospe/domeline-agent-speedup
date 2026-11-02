@@ -289,6 +289,15 @@ def describe_diff(point, base, knobs) -> Dict[str, str]:
     return out
 
 
+def _normalize_pattern(pat):
+    """Spellings small models produce from the prompt's notation: L<l>.op, L<*>.op, L<3>.op, L*l*.op."""
+    s = str(pat).strip()
+    s = re.sub(r"^L<\s*l?\s*>\.", "L*.", s)
+    s = re.sub(r"^L<([^>]*)>\.", r"L\1.", s)
+    s = re.sub(r"^L\*l\*\.|^Ll\.", "L*.", s)
+    return s
+
+
 def expand_changes(knobs: Dict[str, list], changes: Dict) -> Dict:
     """Concrete knob -> option from the agent's changes; patterns L*.fam, La-b.fam, Ln.fam."""
     if not isinstance(changes, dict):
@@ -298,7 +307,7 @@ def expand_changes(knobs: Dict[str, list], changes: Dict) -> Dict:
         if pat in knobs:
             targets = [pat]
         else:
-            m = _PATTERN.match(str(pat).replace("L<l>.", "L*."))
+            m = _PATTERN.match(_normalize_pattern(pat))
             if not m:
                 raise ValueError(f"{pat!r} is not one of your knobs")
             sel, fam = m.groups()
@@ -489,6 +498,7 @@ class LLMAgent:
                 return moves
             except (ValueError, TypeError, AttributeError) as ex:
                 err = call["error"] = str(ex)
+                call["raw"] = json.dumps(out, default=str)[:600]
         call["outcome"] = "invalid"
         return []
 
@@ -648,6 +658,8 @@ def single_agent_search(ev, backend, *, with_readings=False, tb=None, record=Non
                 changes = expand_changes(knobs, out.get("changes") or {})
             except ValueError as ex:
                 feedback = str(ex)
+                tb.log({"kind": "invalid", "agent": "single", "error": str(ex)[:300],
+                        "raw": json.dumps(out, default=str)[:600]})
                 repeats += 1
                 if repeats >= max_repeats:
                     record.stop = "agent gave invalid designs"

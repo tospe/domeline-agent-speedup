@@ -57,6 +57,10 @@ def test_expand_patterns(env):
     assert [k for k in ch if k.endswith(".attention")] == ["L3.attention", "L4.attention", "L5.attention"]
     assert ch["L7.kv_bits"] == 8 and ch["vfu_bw"] == 1e12 and ch["link"] == "die"
     assert A.expand_changes(knobs, {"L<l>.act": "vfu"})["L35.act"] == "vfu"
+    # Spellings mini-coder-4b produced in the smoke run.
+    assert list(A.expand_changes(knobs, {"L<0>.attn_norm": "star"})) == ["L0.attn_norm"]
+    assert len(A.expand_changes(knobs, {"L*l*.attention": "xbar"})) == 36
+    assert len(A.expand_changes(knobs, {"L<*>.rope": "vfu"})) == 36
     for bad in ({"L*.nope": "cpu"}, {"warp_drive": "on"}, {"L*.rope": "gpu"}, {"xbar_scale": "3"}):
         with pytest.raises(ValueError):
             A.expand_changes(knobs, bad)
