@@ -28,7 +28,7 @@ What exists: `search.py` has random, TPE, hill climb on the small space's `KNOBS
 4. **Shadow verifier** (`VerifiedEvaluator` proxy): with the verifier *off*, every evaluated point is still verified on
    the side, so H6 can report illegal proposals per run, rules hit and which accepted moves / final designs were illegal.
 5. Configs `experiments/h/h4.yaml` (small space: walk, team-det, baselines; LLM methods by name later) and
-   `experiments/h/h6.yaml` (verifier off, shadowed; team-det now). Tests in `tests/test_baselines.py`, `tests/test_hrun.py`.
+   `experiments/h/h6.yaml` (verifier off, shadowed; team-det now). Tests in `tests/test_baselines.py` (it also covers the runner).
 
 ## 1. Status: done. Baselines, runner, H4/H5/H6 configs and first runs are committed.
 
@@ -108,7 +108,8 @@ rejected as slower or infeasible anyway. The test on the small space finds the s
 2. **The large-space baseline gap is large, but not yet a fair fight; please decide before the paper uses it.**
    SA and hill climb start from tied START (0.04×). There, a single-slot move changes one of 36 layers, so 3,000 evals
    give fewer than ~3 "full-model" moves. M3 found the same: the climb reached 3.38× after 100k evals. Rows that would
-   make H5 defensible, each a one-line config change I have not run:
+   make H5 defensible, none of them run yet. (c) is a config change. (a) needs a `start:` kwarg on the `sa`/`hill`
+   methods, about 5 lines. (b) needs a tied knob table, a small addition to `knob_table`:
    - (a) SA and hill started from the walk's tied design (does local search improve on it?);
    - (b) SA, hill and TPE over the *tied* subspace plus per-slot moves (a coordinated-neighbourhood ablation);
    - (c) hill with `tol: 0`. Per-layer gains can be below the 0.5% acceptance threshold.
