@@ -135,3 +135,53 @@ I/O.
 1. Rule (a) or (b) in §3.2? This decides whether the paper says 9.48× or 9.47×.
 2. Should the 14-knob claims stay "Evaluator-feasible" (280,296) with the verifier reported separately, or switch to
    "legal"?
+
+## 7. Update after the M1+M2+M3 merge (autopilot dc07f9d)
+
+**What broke.** With M1's real fields, both cases of `test_attention_on_crossbar_without_write_mechanism` failed:
+- `[flag]`: M1's `Op.operands` lists only an op's inputs, and a KV append's KV is an *output*. My rule ("a dynamic,
+  non-activation operand on a crossbar") stopped seeing kv_append.
+- `[no_write_param]`: M1's library now sets `write_mechanism: true` explicitly. Removing `t_write_row_s` therefore left
+  a tech that claims writes but has no write time. The verifier treated it as timeable, and the integrator crashed on
+  `int * None`.
+
+**Semantics decided and implemented** in `harness/verify.py` (tech.py untouched):
+- `writes_stored_matrix(op)` is true for a KV append (it writes K and V every token) and for an op whose stored matrix
+  operand is dynamic (q.K^T, p.V). On a crossbar, either one needs a write mechanism, otherwise `R1.write_mechanism`.
+  The write-mechanism test is `Tech.write_mechanism` (M1's property) when present, otherwise the CONTRACT default.
+- New rule **`R1.library`**: a crossbar that claims a write mechanism but has no `t_write_row_s`. This is a library
+  error. It is reported and the design is not timed (`checked["not_timed"]`); the integrator is never called on it.
+- `op_bits` now uses `Design.kv_bits_for(op)`, so per-layer KV precision from the large space is checked per layer.
+- Tests: the write-mechanism test now covers `flag_false` and `no_flag_no_write_time` (the default derivation), both
+  giving R1.write_mechanism on exactly attn_score, attn_value and kv_append. A new test
+  `test_write_mechanism_without_write_time_is_a_library_error` checks the R1.library case. 13/13 pass.
+
+**The verifier on LargeSpace** (`experiments/verify_large.py`, wrote `results/search/verify_large_main.json`;
+FastEvaluator vs verifier, search sessions, seed 0, 500 distinct points per sample, 14–30 ms per verify):
+
+| sample | feasible & legal | feasible, illegal | infeasible, illegal | legal, infeasible | integrator mismatches |
+|---|---|---|---|---|---|
+| uniform (every slot random) | 83 | 241: 162 R1.sampling+R2.transfer, 79 R2.transfer only | 176 | **0** | **0** |
+| local (headline, 1–8 slots changed) | 496 | 4: 2 R1.sampling+R2.transfer, 2 R2.transfer only | 0 | **0** | **0** |
+
+What is new compared with the 14-knob space:
+1. **`R2.transfer` on its own** (79 uniform, 2 local) means `embed` on the vector unit with `sample` on the host. The
+   large space splits the `edge` knob into separate `embed` and `sample` slots, so the uncharged token id coming in
+   from the host now shows up alone. This is the case §3.3 predicted. It is the same decision as §3.2 (an `io` term,
+   or keep embed on the host).
+   Since edge has two options and embed and sample are independent slots, 3 of 4 uniform points put one of them on PIM.
+   That is why the uniform sample is mostly illegal.
+2. **No other disagreement.** In 1,000 large points, no op-graph crossing, link-byte, launch or transfer total differed
+   from `Integrator.step`. No implied cost was missing from its term. Every R3.capacity verdict matched FastEvaluator's
+   infeasibility, including mixed per-layer KV precision and mixed per-layer attention placement (the attention slot
+   keeps kv_append, score and value together, so R2.dataflow cannot fire in this space). No design was legal but
+   infeasible.
+3. Suggestion for M3/M4 (not done; your call): if the lead keeps rule (a), drop `vfu` from the `embed` and `sample`
+   slots. Then everything the large space can express is legal or infeasible for the same reason the evaluator gives,
+   and search never spends evaluations on points the verifier will reject.
+
+**Tests after the merge:** `pytest tests -q`: 75 passed, 3 failed, all in `tests/test_claims.py` (the same pre-existing
+main.tex/registry failures as in §5). `tests/test_m0_repro.py` and `tests/test_large_space.py` pass.
+
+Files touched in this round: `harness/verify.py`, `tests/test_verify.py`, new `experiments/verify_large.py` and
+`results/search/verify_large_main.json`, this report.
