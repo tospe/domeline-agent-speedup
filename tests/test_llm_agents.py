@@ -7,6 +7,7 @@ from pathlib import Path
 import pytest
 
 from harness import llm_agents as A
+from harness import team as T
 from harness.evaluate import Evaluator
 from harness.large_space import FastEvaluator, LargeSpace
 from harness.model import ModelSpec
@@ -15,7 +16,6 @@ from harness.space import KNOBS, START, Space
 from harness.synthetic import synthetic_sessions
 from harness.tech import load_library
 from harness.tools import RunRecord, Toolbox
-from harness.verify import verify_point
 
 ROOT = Path(__file__).resolve().parent.parent
 MODEL = "/localhome/tsousape/models/mini-coder-4b"
@@ -35,14 +35,14 @@ def small(env, budget=40):
     spec, sess, lib, ref, gpu = env
     space = Space(lib, spec, ref_ctx=ref, host="cpu")
     ev = Evaluator(space, sess, gpu, budget=budget)
-    return ev, Toolbox(ev, verifier=lambda p: verify_point(space, p, sess))
+    return ev, Toolbox(ev, verifier=T.point_verifier(space, sess))
 
 
 def large(env, budget=40):
     spec, sess, lib, ref, gpu = env
     space = LargeSpace(lib, spec, ref_ctx=ref, host="cpu")
     ev = FastEvaluator(space, sess, gpu, budget=budget)
-    return ev, Toolbox(ev, verifier=lambda p: verify_point(space, p, sess))
+    return ev, Toolbox(ev, verifier=T.point_verifier(space, sess))
 
 
 # -- knobs as text and back ------------------------------------------------------
@@ -77,58 +77,90 @@ def test_ownership_partitions_every_knob(env):
         k = A.all_knobs(ev.space)
         parts = [A.knobs_of(ev.space, r) for r in A.ROLES]
         assert sum(len(x) for x in parts) == len(k) and set().union(*parts) == set(k)
-    assert A.owner_of("L4.kv_bits") == "capacity" and A.owner_of("L4.rope") == "mapping"
+    L = large(env)[0].space
+    assert A.owner_of("L4.kv_bits", L) == "capacity" and A.owner_of("L4.rope", L) == "mapping"
     assert A.owner_of("link") == "hardware" and A.owner_of("xbar_scale") == "capacity"
 
 
 # -- role agent ---------------------------------------------------------------------
 
-def ctx_for(ev, tb, role, rec, call_id=1, reading=True):
+def ctx_for(ev, tb, role, term="host", rule_moves=(), reading=True, feedback=None, rnd=0):
     p = ev(A.space_start(ev.space)).point
-    return A.AgentContext(role=role, point=p, reading=tb.read(p) if reading else None,
-                          knobs=A.knobs_of(ev.space, role), history=[], feedback=None, toolbox=tb, record=rec,
-                          budget_left=ev.budget - ev.used, call_id=call_id)
+    return T.AgentContext(role=role, term=term, point=p, reading=tb.read(p) if reading else None,
+                          knobs=A.knobs_of(ev.space, role), rule_moves=list(rule_moves), history=[],
+                          feedback=feedback, round=rnd, budget_left=ev.budget - ev.used)
+
+
+def mv(changes, why="w"):
+    return {"why": why, "changes": changes}
 
 
 def test_agent_retries_out_of_scope_then_proposes(env):
     ev, tb = large(env)
     rec = RunRecord("t", "m", 0, {})
-    fake = A.FakeBackend([{"why": "x", "stop": False, "changes": {"xbar_scale": "2.0"}},     # not its knob
-                          {"why": "norms off the host", "stop": False, "changes": {"L*.attn_norm": "star"}}],
+    fake = A.FakeBackend([{"pass": False, "moves": [mv({"xbar_scale": "2.0"})]},          # not its knob
+                          {"pass": False, "moves": [mv({"L*.attn_norm": "star"}, "norms off the host"),
+                                                    mv({"L*.attn_norm": "star"}),          # duplicate: dropped
+                                                    mv({"L0-3.rope": "vfu"})]}],
                          model="fake-1")
-    prop = A.LLMAgent("mapping", fake).propose(ctx_for(ev, tb, "mapping", rec, call_id=7))
-    assert len(prop.changes) == 36 and set(prop.changes.values()) == {"star"} and not prop.stop
-    assert prop.meta["attempts"] == 2 and "not one of your knobs" in fake.calls[1]["prompt"]
-    assert [c["seed"] for c in fake.calls] == [70, 71]
+    ag = A.LLMAgent("mapping", fake, record=rec, seed=3)
+    moves = ag.propose(ctx_for(ev, tb, "mapping"))
+    assert [len(m.changes) for m in moves] == [36, 4] and all(isinstance(m, T.Move) for m in moves)
+    assert set(moves[0].changes.values()) == {"star"} and moves[0].agent == "mapping"
+    assert "not one of your knobs" in fake.calls[1]["prompt"]
+    assert [c["seed"] for c in fake.calls] == [3_000_000, 3_000_001]
     assert rec.tokens["fake-1"]["in"] > 0 and rec.tokens["fake-1"]["out"] > 0
-    # The prompt carries the reading and only the agent's knobs.
-    assert "binding term: host" in fake.calls[0]["prompt"] and "xbar_scale" not in fake.calls[0]["prompt"].split(
-        "Readings")[0]
+    head = fake.calls[0]["prompt"].split("Readings")[0]
+    assert "binding term: host" in fake.calls[0]["prompt"] and "xbar_scale" not in head
+    assert "routed this reading item to you: host" in fake.calls[0]["prompt"]
 
 
-def test_agent_gives_up_cleanly(env):
+def test_agent_pass_and_give_up(env):
     ev, tb = small(env)
     rec = RunRecord("t", "m", 0, {})
-    fake = A.FakeBackend([{"why": "", "stop": False, "changes": {}}] * 3)
-    prop = A.LLMAgent("hardware", fake, retries=1).propose(ctx_for(ev, tb, "hardware", rec))
-    assert prop.changes == {} and not prop.stop and "error" in prop.meta
-    stop = A.LLMAgent("hardware", A.FakeBackend([])).propose(ctx_for(ev, tb, "hardware", rec))
-    assert stop.stop and stop.changes == {}
+    bad = A.FakeBackend([{"pass": False, "moves": [mv({})]}] * 3)
+    assert A.LLMAgent("hardware", bad, record=rec).propose(ctx_for(ev, tb, "hardware", term="launch")) == []
+    assert len(bad.calls) == 2                                  # one corrective retry, then pass
+    ok = A.FakeBackend([{"pass": True, "moves": []}])
+    assert A.LLMAgent("hardware", ok, record=rec).propose(ctx_for(ev, tb, "hardware")) == []
+    assert len(ok.calls) == 1
 
 
-def test_agent_sees_rule_table_on_small_space(env):
+def test_agent_sees_rule_moves_feedback_round(env):
     ev, tb = small(env)
-    fake = A.FakeBackend([{"why": "x", "stop": False, "changes": {"vector": "star"}}])
-    prop = A.LLMAgent("mapping", fake).propose(ctx_for(ev, tb, "mapping", RunRecord("t", "m", 0, {})))
-    assert prop.changes == {"vector": "star"}
-    assert "Rule-table candidates" in fake.calls[0]["prompt"]
+    fake = A.FakeBackend([{"pass": False, "moves": [mv({"vector": "star"})]}])
+    rm = [T.Move({"vector": "vfu"}, why="host binds; rmsnorm runs on the host", priority=0)]
+    moves = A.LLMAgent("mapping", fake).propose(
+        ctx_for(ev, tb, "mapping", rule_moves=rm, feedback=[("R1.support", "L0.softmax", "x")], rnd=2))
+    assert moves[0].changes == {"vector": "star"}
+    pr = fake.calls[0]["prompt"]
+    assert "Rule-table candidates" in pr and "rmsnorm runs on the host" in pr
+    assert "ILLEGAL" in pr and "R1.support" in pr and "round 2" in pr
 
 
 def test_backend_error_is_retried(env):
     ev, tb = small(env)
-    fake = A.FakeBackend([A.BackendError("boom"), {"why": "x", "stop": False, "changes": {"link": "die"}}])
-    prop = A.LLMAgent("hardware", fake).propose(ctx_for(ev, tb, "hardware", RunRecord("t", "m", 0, {})))
-    assert prop.changes == {"link": "die"}
+    fake = A.FakeBackend([A.BackendError("boom"), {"pass": False, "moves": [mv({"link": "die"})]}])
+    moves = A.LLMAgent("hardware", fake).propose(ctx_for(ev, tb, "hardware"))
+    assert moves[0].changes == {"link": "die"}
+
+
+# -- inside C's loop -------------------------------------------------------------------
+
+def test_llm_team_in_team_search(env):
+    ev, tb = small(env, budget=8)
+
+    def reply(system, prompt, schema):
+        if "MAPPING" in prompt and "vector = cpu" in prompt:
+            return {"pass": False, "moves": [mv({"vector": "star"}, "norms off the host")]}
+        return {"pass": True, "moves": []}
+
+    fake = A.FakeBackend(reply, model="fake-r")
+    rec = RunRecord("t", "llm_team", 0, {})
+    res = T.team_search(ev, tb, A.llm_team(fake), record=rec, max_rounds=2)
+    assert res.accepted[1]["agent"] == "mapping" and res.accepted[1]["move"] == {"vector": "star"}
+    assert rec.tokens["fake-r"]["in"] > 0                       # the loop handed the agents its record
+    assert res.stop
 
 
 # -- baselines ------------------------------------------------------------------------
@@ -137,7 +169,7 @@ def test_single_agent_small(env):
     ev, tb = small(env, budget=6)
     replies = [
         {"why": "a", "stop": False, "base": 1, "changes": {"vector": "star"}},
-        {"why": "same again", "stop": False, "base": 1, "changes": {"vector": "star"}},     # repeated
+        {"why": "same again", "stop": False, "base": 1, "changes": {"vector": "star"}},     # duplicate
         {"why": "sample on PIM", "stop": False, "base": 1, "changes": {"edge": "vfu"}},    # illegal
         {"why": "b", "stop": False, "base": 2, "changes": {"softmax": "star"}},
         {"why": "c", "stop": False, "base": 3, "changes": {"attention": "xbar"}},
@@ -148,7 +180,7 @@ def test_single_agent_small(env):
     fake = A.FakeBackend(replies, model="fake-s")
     rec = A.single_agent_search(ev, fake, tb=tb)
     outs = [e["outcome"] for e in tb.entries]
-    assert outs[:3] == ["accepted", "repeated", "illegal"]
+    assert outs[:3] == ["accepted", "duplicate", "illegal"]
     assert ev.used == 6 and rec.stop == "budget exhausted"
     assert "readings" not in fake.calls[0]["prompt"] and "binding term" not in fake.calls[-1]["prompt"]
     assert "already evaluated as #2" in fake.calls[2]["prompt"]
@@ -174,37 +206,24 @@ def test_eat_team_restructures(env):
     def reply(system, prompt, schema):
         if "team" in schema["properties"]:
             teams.append(prompt)
-            fam = ["rope", "act"] if len(teams) == 1 else ["link", "softmax"]
-            return {"why": "split", "stop": False, "team": [
-                {"name": "w1", "brief": "move vector ops", "families": fam[:1]},
-                {"name": "w2", "brief": "the rest", "families": fam[1:] + ["no_such_family"]}]}
-        if "rope" in prompt.split("Readings")[0] and len(teams) == 1:
-            return {"why": "", "stop": False, "changes": {"L0.rope": "cpu"}}     # no-op -> invalid
-        return {"why": "try", "stop": False, "changes": {"link": "die"} if "link =" in prompt
-                else {"L*.softmax": "star"} if "softmax" in prompt.split("Readings")[0] else {"L*.act": "vfu"}}
+            fam = ["rope"] if len(teams) == 1 else ["link", "act"]
+            return {"why": "try another split", "stop": False, "team": [
+                {"name": f"w{len(teams)}", "brief": "move what you own", "families": fam + ["no_such_family"]}]}
+        if "L<l>.rope" in prompt:                     # team 1: a no-op move -> invalid -> pass
+            return {"pass": False, "moves": [mv({"L0.rope": "cpu"})]}
+        if "link = cxl" in prompt:
+            return {"pass": False, "moves": [mv({"link": "die"}, "faster link")]}
+        return {"pass": True, "moves": []}
 
     fake = A.FakeBackend(reply, model="fake-t")
-    rec = A.eat_team_search(ev, fake, tb=tb, stall_k=3)
-    teams_cfg = rec.config["teams"]
-    assert len(teams_cfg) >= 2 and teams_cfg[0]["team"][0]["families"] == ["rope"]
+    rec = A.eat_team_search(ev, fake, tb=tb, stall_k=3, max_restructures=3)
+    cfg = rec.config["teams"]
+    assert cfg[0]["team"][0]["families"] == ["rope"] and cfg[1]["reason"] == "every worker passed"
+    assert cfg[1]["team"][0]["families"] == ["act", "link"]
     assert all("binding term" not in c["prompt"] for c in fake.calls)            # no readings anywhere
-    assert "no accepted move" in teams_cfg[1]["reason"]
-    assert rec.stop in ("budget exhausted",) or "restructures" in rec.stop or rec.stop == "supervisor stopped"
-
-
-def test_route_smoke(env):
-    ev, tb = small(env, budget=8)
-
-    def reply(system, prompt, schema):
-        if "MAPPING" in prompt:
-            return {"why": "norms", "stop": False, "changes": {"vector": "star"}}
-        return {"why": "", "stop": True, "changes": {}}
-
-    fake = A.FakeBackend(reply, model="fake-r")
-    agents = {r: A.LLMAgent(r, fake) for r in A.ROLES}
-    rec = A.route_search(ev, agents, tb=tb)
-    assert tb.entries[0]["role"] == "mapping" and tb.entries[0]["outcome"] == "accepted"
-    assert rec.accepted[0]["reading"]["binding_term"] == "host"
+    outs = [h["outcome"] for h in tb.entries]
+    assert outs[0] in ("accepted", "slower") and set(outs[1:]) <= {"duplicate"}    # the same move again
+    assert rec.stop == "3 restructures" and rec.tokens["fake-t"]["in"] > 0
 
 
 # -- real backends' parsing (no network) ----------------------------------------------
@@ -240,3 +259,14 @@ def test_local_parsing(monkeypatch):
     reply, usages = A.LocalLlama().call("sys", "p", A.AGENT_SCHEMA, seed=42)
     assert reply["stop"] and usages[0].n_in == 500 and usages[0].model == A.LOCAL
     assert sent["temperature"] == 0.0 and sent["seed"] == 42
+
+
+def test_agent_answers_once_per_round(env):
+    """team_search asks an owner once per agenda term; the agent calls the LLM once per (design, round)."""
+    ev, tb = small(env)
+    fake = A.FakeBackend([{"pass": False, "moves": [mv({"link": "die"})]}] * 4)
+    ag = A.LLMAgent("hardware", fake)
+    assert ag.propose(ctx_for(ev, tb, "hardware", term="launch"))
+    assert ag.propose(ctx_for(ev, tb, "hardware", term="transfer")) == [] and len(fake.calls) == 1
+    assert ag.propose(ctx_for(ev, tb, "hardware", term="launch", rnd=1)) and len(fake.calls) == 2
+    assert ag.propose(ctx_for(ev, tb, "hardware", feedback=[("R4.area", "-", "x")])) and len(fake.calls) == 3

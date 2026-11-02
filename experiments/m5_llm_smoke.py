@@ -1,7 +1,7 @@
 """M5 smoke runs of the LLM agents and LLM baselines, one per backend, small budget.
 
 On the 45 search sessions, LargeSpace + FastEvaluator, verifier on. For each backend:
-  route    the three role agents behind llm_agents.route_search (a stand-in until team.team_search)
+  team     the three LLM role agents in C's loop, team.team_search (readings + routing + verifier)
   single   single_agent_search without readings (E5 baseline)
   eat      eat_team_search, supervisor team without readings or routing (E5 baseline)
 Writes results/m5_llm/<backend>_<method>.json (RunRecord) and results/m5_llm/smoke.csv.
@@ -23,9 +23,9 @@ sys.path.insert(0, str(ROOT / "experiments"))
 
 from common import gpu, library, model, sessions, split  # noqa: E402
 from harness import llm_agents as A  # noqa: E402
+from harness import team as T  # noqa: E402
 from harness.large_space import FastEvaluator, LargeSpace  # noqa: E402
-from harness.tools import Toolbox  # noqa: E402
-from harness.verify import verify_point  # noqa: E402
+from harness.tools import RunRecord, Toolbox  # noqa: E402
 
 BACKENDS = {"sonnet": lambda: A.ClaudeCLI(A.SONNET), "haiku": lambda: A.ClaudeCLI(A.HAIKU),
             "local": lambda: A.LocalLlama()}
@@ -36,15 +36,20 @@ def setup(budget):
     train, test = split(sessions())
     space = LargeSpace(library(), model(), ref_ctx=max(s.max_ctx for s in train + test), host="cpu")
     ev = FastEvaluator(space, train, gpu(), budget=budget)
-    return ev, Toolbox(ev, verifier=lambda p: verify_point(space, p, train))
+    return ev, Toolbox(ev, verifier=T.point_verifier(space, train))
 
 
 def run_one(name, method, budget, seed):
     ev, tb = setup(budget)
     be = BACKENDS[name]()
     t0 = time.time()
-    if method == "route":
-        rec = A.route_search(ev, {r: A.LLMAgent(r, be) for r in A.ROLES}, tb=tb, seed=seed)
+    if method == "team":
+        rec = RunRecord("M5-smoke", "llm_team", seed, {"model": be.model, "budget": budget,
+                                                        "space": "LargeSpace"})
+        agents = A.llm_team(be, record=rec, seed=seed)
+        res = T.team_search(ev, tb, agents, record=rec, max_rounds=3)
+        rec.config.update(llm_calls=sum(len(a.calls) for a in agents.values()), restructures=res.restructures,
+                          rejected=res.rejected, agent_calls=[c for a in agents.values() for c in a.calls])
     elif method == "single":
         rec = A.single_agent_search(ev, be, tb=tb, seed=seed)
     else:
@@ -53,12 +58,12 @@ def run_one(name, method, budget, seed):
     path = OUT / f"{name}_{method}.json"
     rec.write(path, ev, tb)
     d = json.loads(path.read_text())
-    outs = [e["outcome"] for e in d["log"]]
+    outs = [e["outcome"] for e in d["log"] if e.get("kind", "proposal") == "proposal"]
     best = d["final"]
     return {"backend": name, "model_id": be.model, "method": method, "seed": seed, "budget": budget,
             "evaluations": d["cost"]["evaluations"], "proposals": len(outs),
             "accepted": outs.count("accepted"), "illegal": outs.count("illegal"),
-            "repeated": outs.count("repeated"), "best_speedup": best and best["speedup"],
+            "duplicate": outs.count("duplicate"), "best_speedup": best and best["speedup"],
             "start_speedup": d["evaluations"][0]["speedup"], "stop": d["stop"],
             "llm_calls": d["config"].get("llm_calls"),
             "tokens": json.dumps(d["cost"]["tokens"]), "wall_s": round(time.time() - t0, 1)}
@@ -69,7 +74,7 @@ def main():
     ap.add_argument("--budget", type=int, default=10)
     ap.add_argument("--seed", type=int, default=0)
     ap.add_argument("--backends", nargs="+", default=list(BACKENDS))
-    ap.add_argument("--methods", nargs="+", default=["route", "single", "eat"])
+    ap.add_argument("--methods", nargs="+", default=["team", "single", "eat"])
     a = ap.parse_args()
     OUT.mkdir(parents=True, exist_ok=True)
     rows = []

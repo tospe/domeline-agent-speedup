@@ -1,9 +1,9 @@
 """M5: LLM agents for the team loop, and the LLM-based E5 baselines.
 
 Interface with the loop (harness/team.py, Agent C): docs/harness-dev/AGENT_IFACE.md. An agent
-has a `role` and `propose(ctx: AgentContext) -> Proposal`; it sees only its own knobs, never
-calls `evaluate` (the loop owns the budget) and records every LLM call's tokens with
-`ctx.record.add_tokens`.
+has a `role` and `propose(ctx: team.AgentContext) -> [team.Move]`; it sees only its own knobs,
+never evaluates (the loop owns the budget) and adds every LLM call's tokens to `self.record`
+(team_search sets it), per model ID.
 
   Backends     ClaudeCLI("claude-sonnet-5-5" | "claude-haiku-5-5")  the `claude` CLI, headless
                LocalLlama()     mini-coder-4b on llama-server (traces/serve.sh), temperature 0
@@ -13,8 +13,7 @@ calls `evaluate` (the loop owns the budget) and records every LLM call's tokens 
                                      generalized to LargeSpace)
                eat_team_search       an Evolving-Agent-Teams-style team: an LLM supervisor sets
                                      and restructures a team of workers; no readings, no routing
-  route_search a minimal binding-term router for smoke tests of the role agents until
-               team.team_search exists. Not the paper's loop.
+The role agents run inside team.team_search (C's loop): team_search(ev, tb, llm_team(backend)).
 
 Large spaces: LargeSpace has 626 knobs, so prompts show per-layer slots as runs per op family
 ("rope: cpu L0-35") and agents write group moves as patterns ("L*.rope", "L10-20.attention"),
@@ -33,10 +32,12 @@ import time
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Sequence
 
+from . import team as T
 from .agent import KNOB_HELP, LOCAL_URL
 from .evaluate import BudgetExhausted, Eval
 from .search import better
 from .space import KNOBS, START
+from .team import AgentContext, Move
 from .tools import RunRecord, Toolbox
 
 SONNET, HAIKU, LOCAL = "claude-sonnet-5-5", "claude-haiku-5-5", "mini-coder-4b-Q8_0"
@@ -49,64 +50,27 @@ requested."""
 
 
 # ---------------------------------------------------------------------------
-# Loop interface (AGENT_IFACE.md). team.py's classes win when it exists.
+# Loop interface: harness/team.py (docs/harness-dev/AGENT_IFACE.md, written by C)
 # ---------------------------------------------------------------------------
 
-ROLES = ("mapping", "hardware", "capacity")
-CAPACITY_HW = ("xbar_scale", "vfu_mem")
-MAPPING_SMALL = ("mvm", "lm_head", "attention", "softmax", "vector", "edge")
-
-
-def _owner_fallback(knob):
-    if knob in CAPACITY_HW or knob == "kv_bits" or knob.endswith(".kv_bits"):
-        return "capacity"
-    if knob in KNOBS and knob not in MAPPING_SMALL:
-        return "hardware"
-    return "mapping"
-
-
-@dataclass
-class _AgentContext:
-    role: str
-    point: Dict
-    reading: Optional[Dict]
-    knobs: Dict[str, list]
-    history: List[Dict] = field(default_factory=list)
-    feedback: Optional[Dict] = None
-    toolbox: Optional[Toolbox] = None
-    record: Optional[RunRecord] = None
-    budget_left: float = math.inf
-    call_id: int = 0
-
-
-@dataclass
-class _Proposal:
-    changes: Dict
-    why: str
-    stop: bool = False
-    meta: Dict = field(default_factory=dict)
-
-
-try:                                     # Agent C's loop module, once merged
-    from .team import AgentContext, Proposal, owner_of  # type: ignore
-except ImportError:                      # pragma: no cover - until team.py lands
-    AgentContext, Proposal, owner_of = _AgentContext, _Proposal, _owner_fallback
+ROLES = T.ROLES
+owner_of = T.owner_of
 
 
 def all_knobs(space) -> Dict[str, list]:
-    """Every knob of a Space or LargeSpace -> its options, in the space's order."""
-    if hasattr(space, "slots"):
-        return {k: (KNOBS[k] if k in KNOBS else space.slots[k].options) for k in space.knobs}
-    return dict(KNOBS)
+    """Every knob of a Space or LargeSpace -> its options (the union of team.own_knobs)."""
+    out = {}
+    for r in ROLES:
+        out.update(T.own_knobs(space, r))
+    return out
 
 
 def knobs_of(space, role) -> Dict[str, list]:
-    return {k: v for k, v in all_knobs(space).items() if owner_of(k) == role}
+    return T.own_knobs(space, role)
 
 
 def space_start(space):
     return dict(getattr(space, "start", START))
-
 
 # ---------------------------------------------------------------------------
 # Backends
@@ -389,7 +353,7 @@ def _line(e: Eval, base, knobs):
 
 
 # ---------------------------------------------------------------------------
-# Role agent
+# Role agent (team.Agent: role, propose(ctx) -> [Move])
 # ---------------------------------------------------------------------------
 
 ROLE_BRIEF = {
@@ -403,111 +367,139 @@ ROLE_BRIEF = {
                 "need, KV memory next to the vector unit, KV precision per layer). You move the wall.",
 }
 
+_MOVE = {"type": "object",
+         "properties": {"why": {"type": "string"},
+                        "changes": {"type": "object", "additionalProperties": {"type": "string"}}},
+         "required": ["why", "changes"]}
 AGENT_SCHEMA = {
     "type": "object",
-    "properties": {
-        "why": {"type": "string"},
-        "stop": {"type": "boolean"},
-        "changes": {"type": "object", "additionalProperties": {"type": "string"}},
-    },
-    "required": ["why", "stop", "changes"],
+    "properties": {"pass": {"type": "boolean"}, "moves": {"type": "array", "items": _MOVE}},
+    "required": ["pass", "moves"],
 }
 
 
-def _candidates(ctx, n=6):
-    """Rule-table moves (Toolbox.moves) restricted to the agent's knobs; [] where unavailable."""
-    if ctx.reading is None or ctx.toolbox is None:
-        return []
-    try:
-        ms = ctx.toolbox.moves(ctx.point)
-    except (KeyError, TypeError, ValueError):     # e.g. LargeSpace points (moves reads small knobs)
-        return []
-    out = []
-    for m in ms:
-        diff = {k: v for k, v in m["point"].items() if ctx.point.get(k) != v}
-        if diff and set(diff) <= set(ctx.knobs):
-            out.append(f"- {m['why']}: {json.dumps({k: opt_str(v) for k, v in diff.items()})}")
-    return out[:n]
+def _strs(ch):
+    return {k: opt_str(v) for k, v in (ch or {}).items()}
+
+
+def _compact(ch, n=6):
+    ch = _strs(ch)
+    if len(ch) <= n:
+        return ch
+    return {**dict(list(ch.items())[:4]), "...": f"{len(ch) - 4} more"}
 
 
 def _history_lines(hist, n):
+    """team.py history entries: move, why, agent, outcome, time_s, violations."""
     out = []
     for h in hist[-n:]:
-        ch = h.get("changes") or {}
-        shown = dict(list(ch.items())[:6]) if len(ch) <= 6 else {**dict(list(ch.items())[:4]),
-                                                                 "...": f"{len(ch) - 4} more"}
-        line = f"- {h.get('role', '?')}: {json.dumps({k: opt_str(v) for k, v in shown.items()})} -> {h.get('outcome')}"
-        if h.get("speedup") is not None:
-            line += f" ({h['speedup']:.2f}x)"
+        mv = h.get("move")
+        line = f"- {h.get('agent', '?')}: {json.dumps(_compact(mv) if isinstance(mv, dict) else mv)} -> {h.get('outcome')}"
+        if h.get("time_s") is not None:
+            line += f" ({h['time_s']:.1f} s)"
         if h.get("violations"):
-            line += f"; violations: {h['violations'][:3]}"
+            line += f"; violations: {[list(v)[:2] for v in h['violations'][:3]]}"
         out.append(line)
     return "\n".join(out) or "(none yet)"
 
 
 @dataclass
 class LLMAgent:
-    """One role agent: reading + own knobs + history in, one structured move out."""
+    """One role agent: reading + own knobs + rule-table candidates + history in, up to max_moves moves out.
+
+    record   the RunRecord its tokens go to (team_search sets it when None)
+    brief    replaces ROLE_BRIEF[role] (the EAT team's workers)
+    """
     role: str
     backend: object
-    brief: str = ""                 # replaces ROLE_BRIEF[role] (the EAT team's workers)
-    name: str = ""
+    record: Optional[RunRecord] = None
+    brief: str = ""
+    max_moves: int = 3
     history_n: int = 8
     retries: int = 1                # corrective retries for malformed or out-of-scope answers
+    seed: int = 0
+    once_per_round: bool = True     # team_search asks each owner once per agenda term; the prompt already
+                                    # carries the whole reading, so answer once per (design, round)
+    calls: List[Dict] = field(default_factory=list)   # per call: model, tokens, outcome (for the report)
+    _asked: set = field(default_factory=set, repr=False)
 
     def prompt(self, ctx) -> str:
         brief = self.brief or ROLE_BRIEF.get(self.role, f"You are the {self.role} agent.")
-        cands = _candidates(ctx)
         parts = [brief,
-                 "Goal: minimize total workload time (LLM + tools) with a feasible, legal design. "
-                 "A move is accepted only if it is feasible, passes the offload verifier and is more than "
-                 "0.5% faster than the current design.",
+                 "Goal: minimize total workload time (LLM + tools) with a feasible, legal design. A move is "
+                 "accepted only if it passes the offload verifier, is feasible and is more than 0.5% faster "
+                 "than the current design.",
                  f"Current design, your knobs only (change nothing else):\n{describe_knobs(ctx.point, ctx.knobs)}",
                  f"Readings of the current design: {describe_reading(ctx.reading)}"]
-        if cands:
-            parts.append("Rule-table candidates for your knobs (you may pick one or do better):\n" + "\n".join(cands))
+        if ctx.term:
+            parts.append(f"The supervisor routed this reading item to you: {ctx.term}.")
+        if ctx.rule_moves:
+            parts.append("Rule-table candidates for it (you may pick, combine or do better):\n" + "\n".join(
+                f"- {m.why}: {json.dumps(_compact(m.changes))}" for m in ctx.rule_moves[:6]))
         parts.append(f"Recent proposals by the team:\n{_history_lines(ctx.history, self.history_n)}")
         if ctx.feedback:
-            parts.append(f"Your last proposal was rejected: {json.dumps(ctx.feedback, default=str)[:800]}")
+            parts.append("Your last move was ILLEGAL; the verifier says: "
+                         + json.dumps([list(v) for v in ctx.feedback[:6]], default=str)[:800])
+        if ctx.round:
+            parts.append(f"This is round {ctx.round} on this design: earlier moves were not accepted; try "
+                         "something different.")
         parts.append(
-            f"Evaluations left: {ctx.budget_left}. Propose ONE move: `changes` maps knobs to new values "
-            "(strings from the options). For per-layer knobs you may write a group: \"L*.<op>\" (every layer), "
-            "\"L<a>-<b>.<op>\" (layers a..b) or \"L<n>.<op>\". Give 1-2 sentences in `why`. Set stop=true "
-            "(with empty changes) only if no change of your knobs can help now.")
+            f"Evaluations left: {ctx.budget_left}. Propose up to {self.max_moves} moves, best first; each move's "
+            "`changes` maps your knobs to new values (strings from the options). For per-layer knobs you may "
+            "write a group: \"L*.<op>\" (every layer), \"L<a>-<b>.<op>\" (layers a..b) or \"L<n>.<op>\". One "
+            "sentence of `why` per move. Set pass=true with no moves only if no change of your knobs can help.")
         return "\n\n".join(parts)
 
-    def propose(self, ctx) -> "Proposal":
+    def propose(self, ctx) -> List[Move]:
+        if self.once_per_round and not ctx.feedback:
+            k = (json.dumps(ctx.point, sort_keys=True, default=str), ctx.round)
+            if k in self._asked:
+                return []
+            self._asked.add(k)
         base = self.prompt(ctx)
-        meta = {"model": getattr(self.backend, "model", "?"), "tokens_in": 0, "tokens_out": 0, "attempts": 0}
         err = None
         for attempt in range(self.retries + 1):
             prompt = base if err is None else base + f"\n\nYour previous answer was invalid: {err}. Answer again."
-            meta["attempts"] += 1
+            seed = self.seed * 1_000_000 + len(self.calls)
+            call = {"model": getattr(self.backend, "model", "?"), "role": self.role, "term": ctx.term,
+                    "round": ctx.round, "tokens_in": 0, "tokens_out": 0, "seed": seed}
+            self.calls.append(call)
             try:
-                out, usages = ask(self.backend, prompt, AGENT_SCHEMA, ctx.record, seed=ctx.call_id * 10 + attempt)
+                out, usages = ask(self.backend, prompt, AGENT_SCHEMA, self.record, seed=seed)
             except (BackendError, json.JSONDecodeError) as ex:
-                err = f"backend error: {ex}"
+                err = call["error"] = f"backend error: {ex}"
                 continue
-            for u in usages:
-                meta["tokens_in"] += u.n_in
-                meta["tokens_out"] += u.n_out
-            meta["raw"] = out
+            call["tokens_in"] = sum(u.n_in for u in usages)
+            call["tokens_out"] = sum(u.n_out for u in usages)
             try:
-                changes = expand_changes(ctx.knobs, out.get("changes") or {})
-                changes = {k: v for k, v in changes.items() if ctx.point.get(k) != v}
-                stop = bool(out.get("stop"))
-                if not changes and not stop:
-                    raise ValueError("no knob differs from the current design")
-                return Proposal(changes=changes, why=str(out.get("why", ""))[:500], stop=stop and not changes,
-                                meta=meta)
+                if out.get("pass") and not out.get("moves"):
+                    call["outcome"] = "pass"
+                    return []
+                moves, seen = [], set()
+                for mv in (out.get("moves") or [])[:self.max_moves]:
+                    ch = expand_changes(ctx.knobs, mv.get("changes") or {})
+                    ch = {k: v for k, v in ch.items() if ctx.point.get(k) != v}
+                    key = tuple(sorted((k, str(v)) for k, v in ch.items()))
+                    if ch and key not in seen:
+                        seen.add(key)
+                        moves.append(Move(ch, why=str(mv.get("why", ""))[:300], agent=self.role))
+                if not moves:
+                    raise ValueError("no move changes any of your knobs from the current design")
+                call["outcome"] = f"{len(moves)} moves"
+                return moves
             except (ValueError, TypeError, AttributeError) as ex:
-                err = str(ex)
-        meta["error"] = err
-        return Proposal(changes={}, why=f"no valid proposal: {err}", stop=False, meta=meta)
+                err = call["error"] = str(ex)
+        call["outcome"] = "invalid"
+        return []
+
+
+def llm_team(backend, record=None, seed=0, **kw) -> Dict[str, LLMAgent]:
+    """role -> LLMAgent for team.team_search."""
+    return {r: LLMAgent(r, backend, record=record, seed=seed, **kw) for r in ROLES}
 
 
 # ---------------------------------------------------------------------------
-# Shared accept step for the baselines and the smoke router
+# Shared accept step for the baselines (outcomes named as in team.py)
 # ---------------------------------------------------------------------------
 
 @dataclass
@@ -520,47 +512,41 @@ class _Run:
     hist: List[Dict] = field(default_factory=list)
     calls: int = 0
 
-    def check(self, base: Eval, who, prop):
-        """Verify and evaluate base + prop.changes. Returns (Eval or None, outcome, entry); outcome is
-        illegal | repeated | None (evaluated, not judged yet)."""
-        q = {**base.point, **prop.changes}
-        entry = {"role": who, "changes": {k: opt_str(v) for k, v in prop.changes.items()}, "why": prop.why,
-                 "outcome": None, "time_s": None, "speedup": None, "violations": None, "meta": _slim(prop.meta)}
+    def check(self, base: Eval, who, changes, why):
+        """Verify and evaluate base + changes. Returns (Eval or None, outcome, entry); outcome is
+        illegal | duplicate | None (evaluated, not judged yet)."""
+        q = {**base.point, **changes}
+        entry = {"move": _strs(changes), "why": why, "agent": who, "outcome": None, "time_s": None,
+                 "violations": None}
         verdict = _verdict(self.tb, q) if self.use_verifier else None
         entry["verify"] = verdict
         if verdict is not None and not verdict.get("legal", True):
-            entry.update(outcome="illegal", violations=verdict.get("violations"))
+            entry.update(outcome="illegal", violations=[list(v) for v in verdict.get("violations", [])])
             return None, "illegal", entry
         before = self.ev.used
         e = self.ev(q)
         entry.update(time_s=e.time_s, speedup=e.speedup_vs_gpu, eval_n=e.n)
         if self.ev.used == before:
-            entry["outcome"] = "repeated"
-            return e, "repeated", entry
+            return e, "duplicate", entry
         return e, None, entry
 
-    def try_move(self, cur: Eval, who, prop, reading=None):
-        """The loop's step: accept cur + changes if more than eps faster. Returns (current, outcome, entry)."""
-        e, outcome, entry = self.check(cur, who, prop)
+    def try_move(self, cur: Eval, who, changes, why):
+        """Accept cur + changes if more than eps faster. Returns (current, outcome, entry)."""
+        e, outcome, entry = self.check(cur, who, changes, why)
         if outcome is None:
             if better(e, cur, self.eps):
                 outcome = "accepted"
-                self.record.accept(entry["changes"], reading, e, entry["verify"])
+                self.record.accept({"changes": entry["move"], "why": why, "agent": who}, None, e, entry["verify"])
                 cur = e
             else:
-                outcome = "not_faster" if e.feasible else "infeasible: " + e.reason
+                outcome = "slower" if e.feasible else "infeasible"
         entry["outcome"] = outcome
         self.log(entry)
         return cur, outcome, entry
 
     def log(self, entry):
         self.hist.append(entry)
-        self.tb.log(entry)
-
-
-def _slim(meta):
-    return {k: v for k, v in (meta or {}).items() if k != "raw"} | (
-        {"raw": meta["raw"]} if meta and len(json.dumps(meta.get("raw", ""), default=str)) < 2000 else {})
+        self.tb.log({"kind": "proposal", **entry})
 
 
 def _record(ev, experiment, method, seed, config):
@@ -570,7 +556,6 @@ def _record(ev, experiment, method, seed, config):
 def _best_feasible(ev):
     feas = [e for e in ev.log if e.feasible] or list(ev.log)
     return min(feas, key=lambda e: e.time_s)
-
 
 # ---------------------------------------------------------------------------
 # Baseline 1: a single LLM agent, every knob, no readings
@@ -668,21 +653,20 @@ def single_agent_search(ev, backend, *, with_readings=False, tb=None, record=Non
                     record.stop = "agent gave invalid designs"
                     break
                 continue
-            prop = Proposal(changes=changes, why=str(out.get("why", ""))[:500],
-                            meta={"model": backend.model, "base": base.n, "raw": out})
-            e, outcome, entry = run.check(base, "single", prop)
+            e, outcome, entry = run.check(base, "single", changes, str(out.get("why", ""))[:500])
+            entry["base"] = base.n
             if outcome is None:              # a new design: accepted iff it beats the best so far
-                outcome = "accepted" if better(e, best, eps) else (
-                    "not_faster" if e.feasible else "infeasible: " + e.reason)
+                outcome = "accepted" if better(e, best, eps) else ("slower" if e.feasible else "infeasible")
                 if outcome == "accepted":
-                    record.accept(entry["changes"], None, e, entry["verify"])
+                    record.accept({"changes": entry["move"], "why": entry["why"], "agent": "single",
+                                   "base": base.n}, None, e, entry["verify"])
                 if e.feasible and (not best.feasible or e.time_s < best.time_s):
                     best = e
                 evals.append(e)
                 repeats = 0
             entry["outcome"] = outcome
             run.log(entry)
-            if outcome == "repeated":
+            if outcome == "duplicate":
                 repeats += 1
                 feedback = f"that design was already evaluated as #{entry.get('eval_n')}"
                 if repeats >= max_repeats:
@@ -725,7 +709,7 @@ def _team_prompt(ev, knobs, start, evals, best, team, hist, reason):
     fams = families(knobs)
     fam_lines = "\n".join(f"- {f}" + (f" ({len(ks)} per-layer knobs)" if len(ks) > 1 else "") + f": {_help(f)}"
                           for f, ks in fams.items())
-    cur_team = "\n".join(f"- {w.name}: {sorted(families(wk))} — {w.brief}" for w, wk in team) or "(no team yet)"
+    cur_team = "\n".join(f"- {w.role}: {sorted(families(wk))} — {w.brief}" for w, wk in team) or "(no team yet)"
     lines = "\n".join(_line(e, start, knobs) for e in ([best] + [e for e in evals[-10:] if e is not best]))
     return "\n\n".join([
         "You are the SUPERVISOR of a team of design agents. You do not propose designs yourself: you decide "
@@ -745,8 +729,12 @@ def _team_prompt(ev, knobs, start, evals, best, team, hist, reason):
 
 
 def eat_team_search(ev, backend, *, worker_backend=None, tb=None, record=None, eps=0.005, stall_k=6,
-                    max_restructures=20, seed=0, use_verifier=True, experiment="E5"):
-    """Supervisor-managed team without readings or binding-term routing. Returns a RunRecord."""
+                    max_restructures=10, seed=0, use_verifier=True, experiment="E5"):
+    """Supervisor-managed team without readings or binding-term routing. Returns a RunRecord.
+
+    Workers take turns (no routing); each sees only its knobs and the scalar outcomes of the
+    team's proposals. The supervisor (an LLM call) sets the team at the start and whenever
+    stall_k proposals in a row are not accepted, or every worker passes."""
     space = ev.space
     knobs = all_knobs(space)
     fams = families(knobs)
@@ -761,12 +749,12 @@ def eat_team_search(ev, backend, *, worker_backend=None, tb=None, record=None, e
     record.config["teams"] = []
     team: List = []
 
-    def restructure(cur, reason):
+    def restructure(reason):
         nonlocal team
         run.calls += 1
         try:
-            out, _ = ask(backend, _team_prompt(ev, knobs, start, list(ev.log), _best_feasible(ev), team, run.hist, reason),
-                         TEAM_SCHEMA, record, seed=seed * 100000 + run.calls)
+            out, _ = ask(backend, _team_prompt(ev, knobs, start, list(ev.log), _best_feasible(ev), team, run.hist,
+                                               reason), TEAM_SCHEMA, record, seed=seed * 1_000_000 + run.calls)
         except (BackendError, json.JSONDecodeError) as ex:
             out = {"why": f"backend error: {ex}", "stop": False, "team": []}
         new, owned = [], set()
@@ -777,10 +765,11 @@ def eat_team_search(ev, backend, *, worker_backend=None, tb=None, record=None, e
                     owned.add(f)
                     ks.update({k: knobs[k] for k in fams[f]})
             if ks:
-                new.append((LLMAgent(role=str(w.get("name", "worker")), backend=worker_backend,
-                                     brief=str(w.get("brief", "")), name=str(w.get("name", ""))), ks))
-        if not new:                       # unusable answer: keep the old team, or one worker owning everything
-            new = team or [(LLMAgent(role="worker", backend=worker_backend, brief="Improve the design."), dict(knobs))]
+                new.append((LLMAgent(role=str(w.get("name") or "worker"), backend=worker_backend, record=record,
+                                     brief=str(w.get("brief", "")), seed=seed), ks))
+        if not new:      # unusable answer: keep the old team, or one worker owning everything
+            new = team or [(LLMAgent(role="worker", backend=worker_backend, record=record,
+                                     brief="Improve the design.", seed=seed), dict(knobs))]
         team = new
         record.config["teams"].append({"eval_n": ev.used, "reason": reason, "why": str(out.get("why", ""))[:300],
                                        "team": [{"name": w.role, "brief": w.brief, "families": sorted(families(k))}
@@ -789,116 +778,42 @@ def eat_team_search(ev, backend, *, worker_backend=None, tb=None, record=None, e
 
     try:
         cur = ev(start)
-        if restructure(cur, "start of the run"):
-            record.stop = "supervisor stopped at the start"
-            return record
-        turn, since, restructures = 0, 0, 0
-        stopped = set()
-        feedback: Dict[int, Dict] = {}
-        while True:
-            i = turn % len(team)
-            w, wk = team[i]
-            turn += 1
-            if i in stopped:
-                if len(stopped) == len(team):
-                    since = stall_k
-                else:
-                    continue
-            if since < stall_k:
-                run.calls += 1
-                ctx = AgentContext(role=w.role, point=cur.point, reading=None, knobs=wk, history=run.hist[-8:],
-                                   feedback=feedback.pop(i, None), toolbox=tb, record=record,
-                                   budget_left=ev.budget - ev.used, call_id=seed * 100000 + run.calls)
-                prop = w.propose(ctx)
-                if prop.stop:
-                    stopped.add(i)
-                    continue
-                if not prop.changes:
-                    since += 1
-                    continue
-                cur, outcome, entry = run.try_move(cur, w.role, prop)
-                if outcome == "accepted":
-                    since, stopped = 0, set()
-                else:
-                    since += 1
-                    feedback[i] = {"outcome": outcome, "violations": entry.get("violations")}
-            if since >= stall_k:
-                restructures += 1
-                if restructures > max_restructures:
-                    record.stop = f"{max_restructures} restructures without progress"
+        reason = "start of the run"
+        for _ in range(max_restructures + 1):
+            if restructure(reason):
+                record.stop = "supervisor stopped"
+                break
+            since, rnd = 0, 0
+            while since < stall_k:
+                passed = 0
+                for w, wk in team:
+                    run.calls += 1
+                    feedback = None
+                    last = next((h for h in reversed(run.hist) if h["agent"] == w.role), None)
+                    if last and last["outcome"] == "illegal":
+                        feedback = last["violations"]
+                    ctx = AgentContext(role=w.role, term="", point=cur.point, reading=None, knobs=wk,
+                                       rule_moves=[], history=run.hist[-8:], feedback=feedback, round=rnd,
+                                       budget_left=ev.budget - ev.used)
+                    moves = w.propose(ctx)
+                    if not moves:
+                        passed += 1
+                        since += 1
+                    for m in moves:
+                        cur, outcome, _ = run.try_move(cur, w.role, m.changes, m.why)
+                        if outcome == "accepted":
+                            since, rnd = 0, 0
+                            break
+                        since += 1
+                    if since >= stall_k:
+                        break
+                if passed == len(team):
                     break
-                if restructure(cur, f"no accepted move in the last {since} proposals"):
-                    record.stop = "supervisor stopped"
-                    break
-                since, turn, stopped, feedback = 0, 0, set(), {}
-    except BudgetExhausted:
-        record.stop = "budget exhausted"
-    record.config["llm_calls"] = run.calls
-    return record
-
-
-# ---------------------------------------------------------------------------
-# Minimal router for smoke tests of the role agents (C's team_search replaces it)
-# ---------------------------------------------------------------------------
-
-def route_of(term, reading):
-    """My proposal for C's term -> owner table (AGENT_IFACE.md section 1)."""
-    if reading.get("wall_ctx"):
-        return "capacity"
-    if term in ("host", "launch", "transfer"):
-        return "mapping"
-    return "hardware"
-
-
-def route_search(ev, agents: Dict[str, LLMAgent], *, tb=None, record=None, eps=0.005, stop_frac=0.02,
-                 max_fails=2, seed=0, experiment="M5-smoke"):
-    """Route to the owner of the binding term; after max_fails misses, the next term's owner."""
-    space = ev.space
-    tb = tb or Toolbox(ev)
-    model = next(iter(agents.values())).backend.model
-    record = record or _record(ev, experiment, "route_smoke", seed,
-                               {"model": model, "budget": ev.budget, "eps": eps, "space": type(space).__name__})
-    run = _Run(ev, tb, record, eps, True)
-    try:
-        cur = ev(space_start(space))
-        fails, stopped, feedback = 0, set(), {}
-        while True:
-            r = tb.read(cur.point)
-            if cur.feasible and cur.llm_s <= stop_frac * cur.tools_s:
-                record.stop = f"within {stop_frac:.0%} of the Amdahl floor"
-                break
-            order = []
-            for x in r["ranking"]:
-                o = route_of(x["term"], r)
-                if o not in order and o in agents:
-                    order.append(o)
-            order += [o for o in agents if o not in order]
-            live = [o for o in order if o not in stopped]
-            if not live:
-                record.stop = "every agent stopped"
-                break
-            role = live[min(fails // max_fails, len(live) - 1)]
-            run.calls += 1
-            ctx = AgentContext(role=role, point=cur.point, reading=r, knobs=knobs_of(space, role),
-                               history=run.hist[-8:], feedback=feedback.pop(role, None), toolbox=tb,
-                               record=record, budget_left=ev.budget - ev.used, call_id=seed * 100000 + run.calls)
-            prop = agents[role].propose(ctx)
-            if prop.stop:
-                stopped.add(role)
-                continue
-            if not prop.changes:
-                fails += 1
-                continue
-            cur, outcome, entry = run.try_move(cur, role, prop, reading={"binding_term": r["binding_term"],
-                                                                        "amdahl_gap": r["amdahl_gap"]})
-            if outcome == "accepted":
-                fails, stopped = 0, set()
-            else:
-                fails += 1
-                feedback[role] = {"outcome": outcome, "violations": entry.get("violations")}
-            if fails >= max_fails * len(live) * 2:
-                record.stop = "no agent finds an accepted move"
-                break
+                rnd += 1
+            reason = ("every worker passed" if since < stall_k
+                      else f"no accepted move in the last {since} proposals")
+        else:
+            record.stop = f"{max_restructures} restructures"
     except BudgetExhausted:
         record.stop = "budget exhausted"
     record.config["llm_calls"] = run.calls
