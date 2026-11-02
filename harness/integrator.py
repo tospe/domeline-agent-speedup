@@ -113,7 +113,7 @@ class Integrator:
         if key not in self._ops_cache:
             if len(self._ops_cache) > 256:
                 self._ops_cache.clear()
-            self._ops_cache[key] = O.forward_ops(self.model, n_new, ctx, logits_tokens)
+            self._ops_cache[key] = O.ops_for(self.model, n_new, ctx, logits_tokens)
         return self._ops_cache[key]
 
     # -- capacity ------------------------------------------------------------

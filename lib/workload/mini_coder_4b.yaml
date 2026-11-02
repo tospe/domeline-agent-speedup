@@ -1,0 +1,132 @@
+# Workload input: mini-coder-4b (Qwen3-4B architecture) serving a coding agent
+# (mini-swe-agent on SWE-bench). Loaded by harness/workload.py (load_workload).
+#
+# The op graph is the one forward step of harness/ops.py forward_ops, written as data:
+# tests/test_inputs_m1.py checks that this file regenerates forward_ops exactly.
+#
+# Expressions are Python arithmetic over these symbols (all ints):
+#   S   new tokens in the step (decode: 1; prefill chunk: n)
+#   L   context length, the new tokens included
+#   T   tokens that need logits (default S; a prefill step computes 1)
+#   D hidden, F intermediate, H heads, Hkv kv heads, dh head dim, qd = H*dh, kvd = Hkv*dh,
+#   V vocab, a activation bytes (act_bytes below)
+#   flags: qk_norm, sub_norms, relu2 (activation == relu2), kv_layer (this layer keeps KV)
+# Tensor names: "{p}" is the layer prefix ("L3."); names without it are global.
+# operands: inputs of the op, static (fixed after programming: weights, embedding table) or
+# dynamic (changes every token: activations, the KV cache).
+# precisions: operand bit widths the workload accepts. Weights 8 (GGUF Q8_0, what the
+# RTX 3080 baseline runs) or 16 (the bf16 checkpoint); KV 16 (fp16, the GPU's) or 8 (q8_0,
+# the GPU's own fallback); activations fp16. int4 left out: its accuracy cost is not modeled.
+
+name: mini-coder-4b
+hf_config: /localhome/tsousape/models/mini-coder-4b/config.json   # model: must equal ModelSpec.from_hf_config of this
+model:
+  name: mini-coder-4b
+  hidden: 2560
+  intermediate: 9728
+  layers: 36
+  heads: 32
+  kv_heads: 8
+  head_dim: 128
+  vocab: 151936
+  tied_embeddings: true
+  qk_norm: true
+  sub_norms: false
+  activation: silu
+  kv_layers: 36
+
+act_bytes: 2
+
+precisions:                 # per op class; an op may override with its own `precisions`
+  mvm_static: [8, 16]
+  mvm_dynamic: [8, 16]
+  kv_append: [8, 16]
+  vector: [16]
+  gather: [16]
+
+graph:
+  pre:
+    - {name: embed, kind: embed, cls: gather, flops: "0",
+       writes: [[x, "S*D*a"]], operands: [[w.embed, static]]}
+
+  layer:                    # instantiated once per layer l = 0 .. layers-1, in this order
+    - {name: attn_norm, kind: rmsnorm, cls: vector, subcls: reduction_nonlinear, flops: "3*S*D",
+       reads: [[x, "S*D*a"]], writes: [["{p}h", "S*D*a"]], operands: [[x, dynamic]]}
+    - {name: q_proj, kind: q_proj, cls: mvm_static, flops: "2*S*qd*D", shape: [qd, D], group: "{p}qkv",
+       reads: [["{p}h", "S*D*a"]], writes: [["{p}q", "S*qd*a"]],
+       operands: [[w.q_proj, static], ["{p}h", dynamic]]}
+    - {name: k_proj, kind: k_proj, cls: mvm_static, flops: "2*S*kvd*D", shape: [kvd, D], group: "{p}qkv",
+       reads: [["{p}h", "S*D*a"]], writes: [["{p}k", "S*kvd*a"]],
+       operands: [[w.k_proj, static], ["{p}h", dynamic]]}
+    - {name: v_proj, kind: v_proj, cls: mvm_static, flops: "2*S*kvd*D", shape: [kvd, D], group: "{p}qkv",
+       reads: [["{p}h", "S*D*a"]], writes: [["{p}v", "S*kvd*a"]],
+       operands: [[w.v_proj, static], ["{p}h", dynamic]]}
+    - {name: qk_norm, kind: qk_norm, cls: vector, subcls: reduction_nonlinear, when: qk_norm, flops: "3*S*(qd+kvd)",
+       reads: [["{p}q", "S*qd*a"], ["{p}k", "S*kvd*a"]],
+       writes: [["{p}q", "S*qd*a"], ["{p}k", "S*kvd*a"]],
+       operands: [["{p}q", dynamic], ["{p}k", dynamic]]}
+    - {name: rope, kind: rope, cls: vector, flops: "6*S*dh*(H+Hkv)",
+       reads: [["{p}q", "S*qd*a"], ["{p}k", "S*kvd*a"]],
+       writes: [["{p}q", "S*qd*a"], ["{p}k", "S*kvd*a"]],
+       operands: [["{p}q", dynamic], ["{p}k", dynamic]]}
+    - {name: kv_append, kind: kv_append, cls: kv_append, when: kv_layer, flops: "0",
+       reads: [["{p}k", "S*kvd*a"], ["{p}v", "S*kvd*a"]], kv_write_elems: "2*S*kvd",
+       operands: [["{p}k", dynamic], ["{p}v", dynamic]]}
+    - {name: attn_score, kind: attn_score, cls: mvm_dynamic, when: kv_layer, flops: "2*S*L*dh*H",
+       reads: [["{p}q", "S*qd*a"]], writes: [["{p}s", "S*L*H*a"]], kv_read_elems: "L*kvd",
+       operands: [[kv.K, dynamic], ["{p}q", dynamic]]}
+    - {name: softmax, kind: softmax, cls: vector, subcls: reduction_nonlinear, when: kv_layer, flops: "5*S*L*H",
+       reads: [["{p}s", "S*L*H*a"]], writes: [["{p}s", "S*L*H*a"]], operands: [["{p}s", dynamic]]}
+    - {name: attn_value, kind: attn_value, cls: mvm_dynamic, when: kv_layer, flops: "2*S*L*dh*H",
+       reads: [["{p}s", "S*L*H*a"]], writes: [["{p}o", "S*qd*a"]], kv_read_elems: "L*kvd",
+       operands: [[kv.V, dynamic], ["{p}s", dynamic]]}
+    - {name: mixer, kind: mixer, cls: vector, when: "not kv_layer", flops: "4*S*qd*dh",
+       reads: [["{p}q", "S*qd*a"], ["{p}k", "S*kvd*a"], ["{p}v", "S*kvd*a"]],
+       writes: [["{p}o", "S*qd*a"]],
+       operands: [["{p}q", dynamic], ["{p}k", dynamic], ["{p}v", dynamic]]}
+    - {name: attn_sub_norm, kind: rmsnorm, cls: vector, subcls: reduction_nonlinear, when: sub_norms, flops: "3*S*D",
+       reads: [["{p}o", "S*qd*a"]], writes: [["{p}o", "S*qd*a"]], operands: [["{p}o", dynamic]]}
+    - {name: o_proj, kind: o_proj, cls: mvm_static, flops: "2*S*D*qd", shape: [D, qd],
+       reads: [["{p}o", "S*qd*a"]], writes: [["{p}ao", "S*D*a"]],
+       operands: [[w.o_proj, static], ["{p}o", dynamic]]}
+    - {name: attn_residual, kind: residual, cls: vector, flops: "S*D",
+       reads: [[x, "S*D*a"], ["{p}ao", "S*D*a"]], writes: [[x, "S*D*a"]],
+       operands: [[x, dynamic], ["{p}ao", dynamic]]}
+    - {name: mlp_norm, kind: rmsnorm, cls: vector, subcls: reduction_nonlinear, flops: "3*S*D",
+       reads: [[x, "S*D*a"]], writes: [["{p}h2", "S*D*a"]], operands: [[x, dynamic]]}
+    - {name: gate_proj, kind: gate_proj, cls: mvm_static, flops: "2*S*F*D", shape: [F, D], group: "{p}gate_up",
+       reads: [["{p}h2", "S*D*a"]], writes: [["{p}ga", "S*F*a"]],
+       operands: [[w.gate_proj, static], ["{p}h2", dynamic]]}
+    - {name: up_proj, kind: up_proj, cls: mvm_static, flops: "2*S*F*D", shape: [F, D], group: "{p}gate_up",
+       reads: [["{p}h2", "S*D*a"]], writes: [["{p}up", "S*F*a"]],
+       operands: [[w.up_proj, static], ["{p}h2", dynamic]]}
+    - {name: act, kind: act, cls: vector, subcls: reduction_nonlinear, flops: "(2 if relu2 else 4)*S*F + S*F",
+       reads: [["{p}ga", "S*F*a"], ["{p}up", "S*F*a"]], writes: [["{p}m", "S*F*a"]],
+       operands: [["{p}ga", dynamic], ["{p}up", dynamic]]}
+    - {name: ffn_sub_norm, kind: rmsnorm, cls: vector, subcls: reduction_nonlinear, when: sub_norms, flops: "3*S*F",
+       reads: [["{p}m", "S*F*a"]], writes: [["{p}m", "S*F*a"]], operands: [["{p}m", dynamic]]}
+    - {name: down_proj, kind: down_proj, cls: mvm_static, flops: "2*S*D*F", shape: [D, F],
+       reads: [["{p}m", "S*F*a"]], writes: [["{p}d", "S*D*a"]],
+       operands: [[w.down_proj, static], ["{p}m", dynamic]]}
+    - {name: mlp_residual, kind: residual, cls: vector, flops: "S*D",
+       reads: [[x, "S*D*a"], ["{p}d", "S*D*a"]], writes: [[x, "S*D*a"]],
+       operands: [[x, dynamic], ["{p}d", dynamic]]}
+
+  post:
+    - {name: final_norm, kind: rmsnorm, cls: vector, subcls: reduction_nonlinear, flops: "3*S*D",
+       reads: [[x, "S*D*a"]], writes: [[xf, "S*D*a"]], operands: [[x, dynamic]]}
+    - {name: lm_head, kind: lm_head, cls: mvm_static, flops: "2*T*D*V", shape: [V, D], tokens: T,
+       reads: [[xf, "T*D*a"]], writes: [[logits, "T*V*a"]],
+       operands: [[lm_head, static], [xf, dynamic]]}
+    - {name: sample, kind: sample, cls: vector, subcls: sampling, flops: "2*T*V", tokens: T,
+       reads: [[logits, "T*V*a"]], writes: [[token, "T*4"]], operands: [[logits, dynamic]]}
+
+# The trace: one row per turn (the state the turn starts in and the host time tau after it).
+# Exported from results/traces/swebench (+ swebench_kv8 for sessions that hit the GPU's fp16
+# KV wall), restricted to the frozen 89-session workload traces/workload_main.tsv, by
+# experiments/export_inputs.py; equal to experiments/common.sessions().
+trace:
+  file: lib/workload/mini_coder_4b_trace.tsv
+  raw: results/traces/swebench
+  frozen: traces/workload_main.tsv
+  split_seed: 0             # search set = even positions after a seeded shuffle, held-out = odd

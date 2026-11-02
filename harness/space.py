@@ -15,7 +15,7 @@ from dataclasses import dataclass
 from typing import Dict, List, Optional
 
 from .design import Design, Link
-from .ops import forward_ops
+from .ops import ops_for
 
 WEIGHT_MVMS = ("q_proj", "k_proj", "v_proj", "o_proj", "gate_proj", "up_proj", "down_proj")
 VECTOR_OPS = ("rmsnorm", "qk_norm", "rope", "act", "residual")
@@ -199,7 +199,7 @@ class Space:
         from .integrator import Integrator
         d = Design(mapping=self._mapping(p), units={}, kv_bits=p["kv_bits"], host=self.host)
         cap = Integrator(self.model, self.xbar_lib(p)).capacity(d, ctx or self.ref_ctx,
-                                                        forward_ops(self.model, 1, ctx or self.ref_ctx))
+                                                        ops_for(self.model, 1, ctx or self.ref_ctx))
         tech = self.mvm_tech(p)
         t = self.lib[tech]
         if t.kind == "crossbar":
