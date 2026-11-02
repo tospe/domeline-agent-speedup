@@ -79,21 +79,36 @@ def test_sampling_on_pim(env):
     assert any(v.op == "sample" for v in r.by_rule("R2.transfer"))   # the token never comes back
 
 
-@pytest.mark.parametrize("how", ["flag", "no_write_param"])
+@pytest.mark.parametrize("how", ["flag_false", "no_flag_no_write_time"])
 def test_attention_on_crossbar_without_write_mechanism(env, how):
+    """The KV append (a write) and q.K^T / p.V (a stored dynamic matrix) all need one."""
     space, train = env
     d, lib = headline(space)
     x = lib["xbar_transpose"]
     params = dict(x.params)
-    if how == "flag":
+    if how == "flag_false":
         params["write_mechanism"] = False
-    else:
+    else:                                   # CONTRACT default: a crossbar writes iff it has t_write_row_s
+        params.pop("write_mechanism", None)
         params.pop("t_write_row_s")
     lib = {**lib, x.name: replace(x, params=params)}
     r = verify(d, lib, space.model, train)
     assert not r.legal and r.rules() == {"R1.write_mechanism"}
     kinds = {v.op.split(".")[-1] for v in r.violations}
     assert kinds == {"attn_score", "attn_value", "kv_append"}
+
+
+def test_write_mechanism_without_write_time_is_a_library_error(env):
+    """write_mechanism true but no t_write_row_s: reported as R1.library, not a crash in the integrator."""
+    space, train = env
+    d, lib = headline(space)
+    x = lib["xbar_transpose"]
+    params = {**x.params, "write_mechanism": True}
+    params.pop("t_write_row_s")
+    lib = {**lib, x.name: replace(x, params=params)}
+    r = verify(d, lib, space.model, train)
+    assert not r.legal and r.rules() == {"R1.library"}
+    assert "not_timed" in r.checked
 
 
 def test_kv_over_capacity_at_64k(env):

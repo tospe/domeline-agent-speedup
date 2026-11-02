@@ -10,7 +10,10 @@ the evaluator charges, it runs `Integrator.step` and compares against that.
         R1.support          tech does not list op.cls
         R1.sampling         `sample` off the host (a tech must list "sampling")
         R1.precision        op runs at a bit width the op or the tech does not allow
-        R1.write_mechanism  KV on a crossbar that cannot rewrite its arrays
+        R1.write_mechanism  KV on a crossbar that cannot rewrite its arrays (the KV
+                            append itself, and q.K^T / p.V reading a stored KV)
+        R1.library          a crossbar that claims a write mechanism but has no
+                            write time (library error; reported, not timed)
   R2  dependencies hold and every host <-> coprocessor crossing is charged.
         R2.dependency       an op reads a tensor nothing earlier in the step wrote
         R2.dataflow         KV appended on one tech and read on another (the
@@ -56,6 +59,7 @@ EXPLICIT_SUBCLS = (SAMPLING,)        # subclasses a non-host tech must list by n
 
 TOKEN_BYTES = 4                      # one token id (the `token` tensor ops.py writes)
 STEP_IN, STEP_OUT = "token_in", "token"
+UNTIMEABLE = ("R1.support", "R1.write_mechanism", "R1.library")   # integrator would raise
 REL = 1e-9                           # tolerance for comparing against the integrator
 
 
@@ -137,10 +141,26 @@ def tech_precisions(t):
 
 
 def has_write_mechanism(t):
+    """Tech.write_mechanism (M1) if present, else the CONTRACT default."""
+    w = getattr(type(t), "write_mechanism", None)
+    if isinstance(w, property):
+        return t.write_mechanism
     w = t.p("write_mechanism")
     if w is not None:
         return bool(w)
-    return t.p("t_write_row_s") is not None
+    return t.p("t_write_row_s") is not None if t.kind == "crossbar" else True
+
+
+def writes_stored_matrix(op):
+    """Does the op put per-token data into the matrix its unit stores?
+
+    A KV append writes K and V (its KV is an output, so it is not among Op.operands);
+    an MVM whose matrix operand is dynamic (q.K^T, p.V) needs that matrix rewritten
+    as it grows. Activation inputs are streamed, not stored.
+    """
+    if op.cls == O.KV_APPEND:
+        return True
+    return any(k == "dynamic" and not _activation(tn) for tn, k in op_operands(op))
 
 
 def op_bits(op, design):
@@ -148,7 +168,7 @@ def op_bits(op, design):
     if op.cls == O.MVM_STATIC:
         return design.weight_bits
     if op.cls in (O.MVM_DYNAMIC, O.KV_APPEND):
-        return design.kv_bits
+        return design.kv_bits_for(op) if hasattr(design, "kv_bits_for") else design.kv_bits
     return O.ACT_BYTES * 8
 
 
@@ -190,11 +210,15 @@ def _r1(design, lib, ops, V):
         for who, allowed in (("op", op_precisions(op)), (tname, tech_precisions(t))):
             if allowed and bits not in allowed:
                 V.append(Violation("R1.precision", op.name, f"runs at {bits} b; {who} allows {list(allowed)}"))
-        if t.kind == "crossbar" and any(k == "dynamic" for tn, k in op_operands(op) if not _activation(tn)) \
-                and not has_write_mechanism(t):
-            V.append(Violation("R1.write_mechanism", op.name,
-                               f"{op.kind} keeps a dynamic operand (KV) in {tname}, which has no write "
-                               f"mechanism (no t_write_row_s / write_mechanism false)"))
+        if t.kind == "crossbar" and writes_stored_matrix(op):
+            if not has_write_mechanism(t):
+                V.append(Violation("R1.write_mechanism", op.name,
+                                   f"{op.kind} writes KV into {tname} every token, and {tname} has no write "
+                                   f"mechanism (write_mechanism false, or no t_write_row_s)"))
+            elif t.p("t_write_row_s") is None:
+                V.append(Violation("R1.library", op.name,
+                                   f"{tname} claims a write mechanism but gives no t_write_row_s: the "
+                                   f"per-token KV write cannot be costed (library error)"))
 
 
 def _activation(tensor):
@@ -429,7 +453,7 @@ def verify(design, lib, model, sessions, caps: Caps = None, *, area_mm2=None, ef
     ops = integ.ops(1, top)
     _r1(design, lib, ops, V)
     _r2_static(design, lib, ops, V, implied)
-    timeable = not any(v.rule in ("R1.support", "R1.write_mechanism") for v in V)
+    timeable = not any(v.rule in UNTIMEABLE for v in V)
     if timeable:
         steps = {"decode": (1, top, None),
                  "prefill": (prefill_chunk, max(top, prefill_chunk), 1)}
