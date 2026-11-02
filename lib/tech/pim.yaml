@@ -16,7 +16,23 @@
   # xbar with its ADCs, eDRAM and routing amortized in. At chip level (85.4 mm^2 for
   # 168 tiles, I/O included) it is 0.0053 mm^2.
   area_mm2_per_unit: 0.00388
+  precisions: [8, 16]
+  sources:
+    precisions: "ISAAC slices wide weights over 2-b cells (16-b weights in the paper); 8 = the int8 (Q8_0) weights of the workload"
+    write_mechanism: "PipeLayer (HPCA 2017) ReRAM row write; ISAAC itself never writes at run time"
+    area_mm2_per_unit: "ISAAC Table I: tile 0.372 mm2 / (12 IMAs x 8 xbars) (checked)"
+    effort_months: "convention: reference technology, effort 0"
+    rows: "ISAAC Table I (checked)"
+    cols: "ISAAC Table I (checked)"
+    bits_per_cell: "ISAAC Table I (checked)"
+    input_bits: "workload: int8 activations (ISAAC uses 16-b inputs); design choice"
+    dac_bits: "ISAAC Table I: 1-b DAC (checked)"
+    t_read_s: "ISAAC: one 100 ns cycle is the read latency (checked)"
+    t_add_s: "VERIFY: assumed 1 ns per adder-tree level"
+    t_write_row_s: "VERIFY: PipeLayer HPCA 2017 single-pulse ReRAM write, 50.88 ns (moves the headline <1%)"
+    write_parallel_arrays: "VERIFY: assumed 1024 arrays written in parallel"
   params:
+    write_mechanism: true
     rows: 128
     cols: 128
     bits_per_cell: 2
@@ -37,7 +53,23 @@
   maturity: projected
   effort_months: 0
   area_mm2_per_unit: 0.00388
+  precisions: [8, 16]
+  sources:
+    precisions: "as xbar_isaac"
+    write_mechanism: "write-verify programming (assumed)"
+    area_mm2_per_unit: "as xbar_isaac (ISAAC Table I, checked)"
+    effort_months: "convention: reference technology, effort 0"
+    rows: "ISAAC Table I (checked)"
+    cols: "ISAAC Table I (checked)"
+    bits_per_cell: "ISAAC Table I (checked)"
+    input_bits: "workload: int8 activations; design choice"
+    dac_bits: "ISAAC Table I (checked)"
+    t_read_s: "ISAAC (checked)"
+    t_add_s: "VERIFY: assumed 1 ns per adder-tree level"
+    t_write_row_s: "VERIFY: assumed ~1 us write-verify per row for 2-b cells (pessimistic corner)"
+    write_parallel_arrays: "VERIFY: assumed 1024 arrays written in parallel"
   params:
+    write_mechanism: true
     rows: 128
     cols: 128
     bits_per_cell: 2
@@ -58,7 +90,23 @@
   maturity: projected
   effort_months: 3
   area_mm2_per_unit: 0.0045
+  precisions: [8, 16]
+  sources:
+    precisions: "as xbar_isaac"
+    write_mechanism: "transposable write path (assumed), PipeLayer write latency"
+    area_mm2_per_unit: "VERIFY: ISAAC xbar area +15% for a second write driver set (assumption)"
+    effort_months: "VERIFY: assumed 3 months for the transposable write path"
+    rows: "ISAAC Table I (checked)"
+    cols: "ISAAC Table I (checked)"
+    bits_per_cell: "ISAAC Table I (checked)"
+    input_bits: "workload: int8 activations; design choice"
+    dac_bits: "ISAAC Table I (checked)"
+    t_read_s: "ISAAC (checked)"
+    t_add_s: "VERIFY: assumed 1 ns per adder-tree level"
+    t_write_row_s: "VERIFY: PipeLayer HPCA 2017 single-pulse ReRAM write, 50.88 ns"
+    write_parallel_arrays: "VERIFY: assumed 1024 arrays written in parallel"
   params:
+    write_mechanism: true
     rows: 128
     cols: 128
     bits_per_cell: 2
@@ -79,7 +127,18 @@
   maturity: simulated
   effort_months: 1
   area_mm2_per_unit: 0.004
+  precisions: [8, 16]
+  sources:
+    precisions: "PUMA VFU is 16-b fixed point; int8 KV assumed to run on it at the same rate"
+    write_mechanism: "KV appends go to its local memory"
+    area_mm2_per_unit: "VERIFY: assumed, PUMA VFU area not checked"
+    effort_months: "VERIFY: assumed 1 month"
+    ops_per_s: "VERIFY: 4 lanes at 1 GHz, PUMA Table 3 width/clock not checked"
+    mem_bw_Bps: "design knob (space.KNOBS vfu_bw overrides it when attention runs here); not from PUMA"
+    local_mem_bytes: "design knob (space.KNOBS vfu_mem overrides it when attention runs here); not from PUMA"
+    op_overhead_s: "VERIFY: assumed 5 ns per op"
   params:
+    write_mechanism: true
     ops_per_s: 4.0e9            # per unit: 4 lanes at 1 GHz
     mem_bw_Bps: 64.0e9          # local SRAM/eDRAM read bandwidth for KV, total
     bw_scales_with_units: false
@@ -95,7 +154,17 @@
   maturity: projected
   effort_months: 4
   area_mm2_per_unit: 0.02
+  precisions: [16]
+  sources:
+    precisions: "fp16 activations (workload); VERIFY against STAR's datapath width"
+    write_mechanism: "fixed-function nonlinear unit, no stored matrix"
+    area_mm2_per_unit: "VERIFY: placeholder to size, STAR's area not checked"
+    effort_months: "VERIFY: assumed 4 months"
+    ops_per_s: "VERIFY: placeholder to size, STAR's throughput not checked"
+    mem_bw_Bps: "VERIFY: placeholder (own score buffer per instance)"
+    op_overhead_s: "VERIFY: assumed 2 ns per op"
   params:
+    write_mechanism: false
     ops_per_s: 64.0e9           # per instance
     mem_bw_Bps: 64.0e9          # per instance: each has its own score buffer
     bw_scales_with_units: true
@@ -109,7 +178,21 @@
   maturity: published-silicon
   effort_months: 0
   area_mm2_per_unit: 0.0
+  precisions: [8, 16]
+  sources:
+    precisions: "int8 MAC measured (VIPER); DPUs run 16/32-b integer arithmetic natively"
+    write_mechanism: "MRAM written by host transfers"
+    area_mm2_per_unit: "convention: DRAM-PIM dies are memory, not coprocessor logic area"
+    effort_months: "convention: commercial part, effort 0"
+    ops_per_s: "measured: 48 M int8 MAC/s per DPU on the 2,560-DPU server (VIPER case study)"
+    bank_bw_Bps: "VERIFY: MRAM->WRAM per DPU, Gomez-Luna et al., IEEE Access 2022"
+    local_mem_bytes: "UPMEM: 64 MB MRAM per DPU (Gomez-Luna et al., IEEE Access 2022)"
+    op_overhead_s: "model convention: per-call cost is in the measured transfer law"
+    xfer_t0_s: "measured: T_transfer = 1.82 ms + 1.68 us x N (VIPER case study)"
+    xfer_s_per_unit: "measured: T_transfer = 1.82 ms + 1.68 us x N (VIPER case study)"
+    units_ref: "experiment convention (experiments/generality.py): xbar_scale 1.25 -> 2,560 DPUs, the measured server"
   params:
+    write_mechanism: true
     ops_per_s: 96.0e6          # 48 M MAC/s = 96 M op/s per DPU
     bank_bw_Bps: 0.63e9        # MRAM->WRAM per DPU (Gomez-Luna et al., IEEE Access 2022). VERIFY
     local_mem_bytes: 64.0e6    # MRAM per DPU
