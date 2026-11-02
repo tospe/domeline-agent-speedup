@@ -24,6 +24,11 @@ class Design:
     kv_bits: int = 16
     host: str = "cpu"
     label: str = ""
+    kv_bits_by_layer: Dict[int, int] = field(default_factory=dict)   # per-layer KV precision (large space)
+
+    def kv_bits_for(self, op):
+        """KV bits for op: its layer's entry in kv_bits_by_layer, else kv_bits."""
+        return self.kv_bits_by_layer.get(op.layer, self.kv_bits) if self.kv_bits_by_layer else self.kv_bits
 
     def tech_for(self, op):
         m = self.mapping

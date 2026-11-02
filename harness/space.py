@@ -179,7 +179,10 @@ class Space:
 
     def xbar_lib(self, p):
         """The library with the crossbar tech adjusted by the area knobs (tile, ADCs, cell bits)."""
-        p = self.canonical(p)
+        return self._xbar_lib_canonical(Space.canonical(self, p))
+
+    def _xbar_lib_canonical(self, p):
+        """xbar_lib for a canonical small-space point (LargeSpace passes its proxy point)."""
         if not ACTIVE_IF["xbar_tile"](p) or (p["xbar_tile"], p["adc_per_ima"], p["cell_bits"]) == ("isaac", 8, 2):
             return self.lib
         lib = dict(self.lib)
