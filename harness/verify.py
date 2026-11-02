@@ -59,6 +59,7 @@ EXPLICIT_SUBCLS = (SAMPLING,)        # subclasses a non-host tech must list by n
 
 TOKEN_BYTES = 4                      # one token id (the `token` tensor ops.py writes)
 STEP_IN, STEP_OUT = "token_in", "token"
+SAMPLING_RULES = ("host", "any")
 UNTIMEABLE = ("R1.support", "R1.write_mechanism", "R1.library")   # integrator would raise
 REL = 1e-9                           # tolerance for comparing against the integrator
 
@@ -190,7 +191,7 @@ def trace_states(sessions):
 # The rules
 # ---------------------------------------------------------------------------
 
-def _r1(design, lib, ops, V):
+def _r1(design, lib, ops, V, sampling="host"):
     for op in ops:
         tname = design.tech_for(op)
         t = lib.get(tname)
@@ -202,7 +203,7 @@ def _r1(design, lib, ops, V):
                                f"{tname} ({t.kind}) supports {list(t.supports)}, not {op.cls} ({op.kind})"))
             continue
         sub = op_subcls(op)
-        if sub in EXPLICIT_SUBCLS and not t.on_host and sub not in t.supports:
+        if sampling == "host" and sub in EXPLICIT_SUBCLS and not t.on_host and sub not in t.supports:
             V.append(Violation("R1.sampling", op.name,
                                f"{op.kind} is {sub}: it needs the full logits, an RNG and the token on the "
                                f"host; {tname} does not list {sub!r}"))
@@ -225,7 +226,7 @@ def _activation(tensor):
     return not (tensor == "kv" or tensor.startswith(("kv.", "w.")) or tensor == "lm_head")
 
 
-def _r2_static(design, lib, ops, V, implied):
+def _r2_static(design, lib, ops, V, implied, sampling="host"):
     """Dependencies, KV placement and the token's way in and out."""
     written = {STEP_IN}
     for op in ops:
@@ -257,6 +258,8 @@ def _r2_static(design, lib, ops, V, implied):
         sec = design.link.t0_s + nbytes / design.link.bw_Bps + (design.link.sync_s if way == "back to" else 0.0)
         implied.append(ImpliedCost("token_io", op.name, tname, sec, None, False,
                                    f"token {way} the host every step ({nbytes:.0f} B); not modeled"))
+        if sampling == "any":
+            continue        # rule (b): accepted as an unmodeled implied cost, not a violation
         V.append(Violation("R2.transfer", op.name,
                            f"{op.kind} on {tname}: the token must cross {way} the host every step "
                            f"(~{sec * 1e6:.2f} us at {design.link.bw_Bps / 1e9:.0f} GB/s), and the integrator "
@@ -436,8 +439,16 @@ def _r4(design, lib, caps, area, effort, V, checked):
 # ---------------------------------------------------------------------------
 
 def verify(design, lib, model, sessions, caps: Caps = None, *, area_mm2=None, effort_months=None,
-           ops_cache=None, prefill_chunk=256) -> VerifyResult:
-    """Check design (on library lib, for model) against the four rules over the sessions' states."""
+           ops_cache=None, prefill_chunk=256, sampling="host") -> VerifyResult:
+    """Check design (on library lib, for model) against the four rules over the sessions' states.
+
+    sampling  "host" (default, rule (a) of REPORT-M2 §3.2): `sample` stays on the host unless a tech
+              lists "sampling", and the token's way in/out of PIM is an uncharged crossing (R2.transfer).
+              "any" (rule (b)): neither is a violation; the token crossing stays as an uncharged
+              implied cost (token_io). The paper's choice between them is pending.
+    """
+    if sampling not in SAMPLING_RULES:
+        raise ValueError(f"sampling={sampling!r}: one of {SAMPLING_RULES}")
     caps = caps or Caps()
     integ = Integrator(model, lib)
     if ops_cache is not None:
@@ -451,8 +462,8 @@ def verify(design, lib, model, sessions, caps: Caps = None, *, area_mm2=None, ef
     checked: Dict = {}
 
     ops = integ.ops(1, top)
-    _r1(design, lib, ops, V)
-    _r2_static(design, lib, ops, V, implied)
+    _r1(design, lib, ops, V, sampling)
+    _r2_static(design, lib, ops, V, implied, sampling)
     timeable = not any(v.rule in UNTIMEABLE for v in V)
     if timeable:
         steps = {"decode": (1, top, None),
