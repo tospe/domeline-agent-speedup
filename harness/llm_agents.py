@@ -484,16 +484,22 @@ class LLMAgent:
                 if out.get("pass") and not out.get("moves"):
                     call["outcome"] = "pass"
                     return []
-                moves, seen = [], set()
+                moves, seen, dropped = [], set(), []
                 for mv in (out.get("moves") or [])[:self.max_moves]:
-                    ch = expand_changes(ctx.knobs, mv.get("changes") or {})
+                    try:                  # an invalid move is dropped; the valid ones still count
+                        ch = expand_changes(ctx.knobs, mv.get("changes") or {})
+                    except (ValueError, TypeError, AttributeError) as ex:
+                        dropped.append(str(ex))
+                        continue
                     ch = {k: v for k, v in ch.items() if ctx.point.get(k) != v}
                     key = tuple(sorted((k, str(v)) for k, v in ch.items()))
                     if ch and key not in seen:
                         seen.add(key)
                         moves.append(Move(ch, why=str(mv.get("why", ""))[:300], agent=self.role))
+                if dropped:
+                    call["dropped"] = dropped
                 if not moves:
-                    raise ValueError("no move changes any of your knobs from the current design")
+                    raise ValueError("; ".join(dropped) or "no move changes any of your knobs from the current design")
                 call["outcome"] = f"{len(moves)} moves"
                 return moves
             except (ValueError, TypeError, AttributeError) as ex:
@@ -830,3 +836,57 @@ def eat_team_search(ev, backend, *, worker_backend=None, tb=None, record=None, e
         record.stop = "budget exhausted"
     record.config["llm_calls"] = run.calls
     return record
+
+
+# ---------------------------------------------------------------------------
+# Entry points for experiments/hrun.py (use as "harness.llm_agents:h_team" etc.)
+# ---------------------------------------------------------------------------
+
+BACKENDS = {"sonnet": lambda: ClaudeCLI(SONNET), "haiku": lambda: ClaudeCLI(HAIKU), "local": lambda: LocalLlama()}
+
+
+def _backend(name):
+    if name not in BACKENDS:
+        raise KeyError(f"backend {name!r}: one of {sorted(BACKENDS)}")
+    return BACKENDS[name]()
+
+
+def _gate_counts(run, entries):
+    run.gate.proposals = len(entries)
+    run.gate.illegal = sum(e.get("outcome") == "illegal" for e in entries)
+    for e in entries:
+        if e.get("outcome") == "illegal":
+            for r in sorted({v[0] for v in e.get("violations") or []}):
+                run.gate.rules[r] += 1
+
+
+def h_team(run, backend="sonnet", **kw):
+    """C's team loop (readings + routing + verifier) with the three LLM role agents."""
+    be = _backend(backend)
+    agents = llm_team(be, record=run.record, seed=run.seed)
+    excl = {k: set(v) for k, v in (run.cfg.get("exclude") or {}).items()}
+    r = T.team_search(run.ev, run.toolbox, agents, record=run.record, budget=run.ev.budget,
+                      exclude=excl or None, **kw)
+    calls = [c for a in agents.values() for c in a.calls]
+    run.extra.update(model_id=be.model, proposals=r.proposals, rejected=r.rejected, restructures=r.restructures,
+                     llm_calls=len(calls), agent_calls=calls)
+    run.gate.proposals, run.gate.illegal = r.proposals, r.rejected.get("illegal", 0)
+
+
+def h_single(run, backend="sonnet", with_readings=False, **kw):
+    """One LLM, every knob; scalar history (with_readings=False) or with Domeline readings."""
+    be = _backend(backend)
+    single_agent_search(run.ev, be, with_readings=with_readings, tb=run.toolbox, record=run.record,
+                        seed=run.seed, use_verifier=run.toolbox.verifier is not None, **kw)
+    run.extra.update(model_id=be.model, llm_calls=run.record.config.get("llm_calls"))
+    _gate_counts(run, [e for e in run.toolbox.entries if e.get("kind") == "proposal"])
+
+
+def h_eat(run, backend="sonnet", **kw):
+    """Evolving-Agent-Teams-style supervisor team, no readings, no routing."""
+    be = _backend(backend)
+    eat_team_search(run.ev, be, tb=run.toolbox, record=run.record, seed=run.seed,
+                    use_verifier=run.toolbox.verifier is not None, **kw)
+    run.extra.update(model_id=be.model, llm_calls=run.record.config.get("llm_calls"),
+                     teams=run.record.config.get("teams"))
+    _gate_counts(run, [e for e in run.toolbox.entries if e.get("kind") == "proposal"])

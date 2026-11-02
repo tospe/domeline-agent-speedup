@@ -274,3 +274,11 @@ def test_agent_answers_once_per_round(env):
     assert ag.propose(ctx_for(ev, tb, "hardware", term="transfer")) == [] and len(fake.calls) == 1
     assert ag.propose(ctx_for(ev, tb, "hardware", term="launch", rnd=1)) and len(fake.calls) == 2
     assert ag.propose(ctx_for(ev, tb, "hardware", feedback=[("R4.area", "-", "x")])) and len(fake.calls) == 3
+
+
+
+def test_agent_drops_only_invalid_moves(env):
+    ev, tb = small(env)
+    fake = A.FakeBackend([{"pass": False, "moves": [mv({"vector": "star"}), mv({"link": "die"})]}])
+    moves = A.LLMAgent("mapping", fake).propose(ctx_for(ev, tb, "mapping"))
+    assert [m.changes for m in moves] == [{"vector": "star"}] and len(fake.calls) == 1
