@@ -63,8 +63,9 @@ Rules as implemented (the module docstring lists them):
 Implied costs: `kv_write`, `reprogram`, `kv_spill`, `scatter` and `token_io`, each with seconds per decode step, the
 term it must appear in, and `charged`. **Cross-check:** for the headline design, the 36 per-token KV writes
 (xbar_transpose: 1 K row + 1 V row = 101.76 ns per layer) add up exactly (rel 1e-12) to the integrator's `write` term at
-64K. For every design in the sweep, the op graph's crossings, link bytes, launch and transfer matched `Integrator.step`
-to 1e-9. No R2.transfer or R2.implied mismatch occurred inside the 14-knob space; it only fires on the edge=vfu token
+64K. The op graph's crossings, link bytes, launch and transfer matched `Integrator.step` (to 1e-9) for every edge=cpu
+design in the sweep and for a seeded sample of 2,000 edge=vfu designs. No R2.transfer or R2.implied mismatch occurred inside
+the 14-knob space; R2.transfer only fires on the edge=vfu token
 I/O.
 
 ## 2. Numbers: the verifier against the exhaustive sweep (all 575,400 designs)
