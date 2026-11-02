@@ -343,10 +343,10 @@ class Tables:
     def tech_key(t, units):
         return (t.name, repr(sorted(t.params.items())), units)
 
-    def cost(self, i, t, units, kb, link_bw=None):
+    def cost(self, i, t, units, kb, link_bw=None, tkey=None):
         """(weighted s, term, vector over steps) of op i on tech t. link_bw: KV spilled over the link."""
         op = self.ops[i]
-        k = (op.sig, self.tech_key(t, units), kb, link_bw)
+        k = (op.sig, tkey or self.tech_key(t, units), kb, link_bw)
         if k not in self._cost:
             d = Design(mapping={}, units={t.name: units}, kv_bits=kb)
             over = set()
@@ -816,39 +816,33 @@ def certificate(fe: FastEvaluator):
     minimized over its options, the KV bits and every hardware setting. Valid because every
     term is >= 0 (launch, transfer, NoC and reprogramming are dropped) and op costs do not
     depend on other ops' placement; crossbar groups (q/k/v, gate/up) count their max when
-    every member is on the crossbar, as the integrator does. Returns (floor_s, parts) where
+    their members are on the crossbar (bounded below by the largest member's cheapest cost). Returns (floor_s, parts) where
     parts[role] is the floor's LLM time from slots of that role.
     """
     space: LargeSpace = fe.space
     T = fe.tables
-    best = {}            # (op index, value, kb) -> min weighted s ; and vectors for groups
-    best_vec = {}
+    # Every distinct (tech, units) variant a role value can take over the hardware settings.
+    variants = defaultdict(dict)          # value -> tech_key -> (Tech, units)
     for hw in hardware_settings(space):
-        p = {**space.start, **hw}
-        for s in space.place_slots:
-            p[s.name] = "xbar" if "xbar" in s.options else s.options[-1]
-        for s in space.place_slots:
-            if s.role == "attention":
-                p[s.name] = "vfu"
-        _, design, lib, _ = fe.chain(p)
-        tech = space._tech(space.canonical(p))
-        for i, op in enumerate(T.ops):
-            s = space.op_slot.get(op.name)
-            vals = space.slots[s].options if s else ["cpu"]
-            kbs = KNOBS["kv_bits"] if op.layer is not None and op.kind in ATTN_OPS else [design.kv_bits]
-            for v in vals:
-                tname = tech[v]
-                t = lib[tname]
+        for attn_vfu in (False, True):
+            d, lib = space.fixed_hardware(hw, attn_vfu)
+            for v, tname in space._tech({**space.start, **hw}).items():
+                t, u = lib[tname], d.units.get(tname, 1)
+                variants[v].setdefault(Tables.tech_key(t, u), (t, u))
+    best, best_vec = {}, {}               # (op, value, kb) -> min weighted s / argmin vector
+    for i, op in enumerate(T.ops):
+        s = space.op_slot.get(op.name)
+        vals = space.slots[s].options if s else ["cpu"]
+        kbs = KNOBS["kv_bits"]
+        for v in vals:
+            for tk, (t, u) in variants[v].items():
                 if not t.can_run(op.cls):
                     continue
                 for kb in kbs:
-                    sec, term, vec = T.cost(i, t, design.units.get(tname, 1), kb)
+                    sec, term, vec = T.cost(i, t, u, kb, tkey=tk)
                     k = (i, v, kb)
                     if k not in best or sec < best[k]:
-                        best[k] = sec
-                    if op.group and t.kind == "crossbar":
-                        if k not in best_vec or float(T.w @ vec) < float(T.w @ best_vec[k]):
-                            best_vec[k] = vec
+                        best[k], best_vec[k] = sec, vec
     parts = defaultdict(float)
     done = set()
     for i, op in enumerate(T.ops):
@@ -856,16 +850,18 @@ def certificate(fe: FastEvaluator):
             continue
         s = space.op_slot.get(op.name)
         role = space.slots[s].role if s else "host_only"
+        kb_min = lambda j, v: min((best[(j, v, kb)] for kb in KNOBS["kv_bits"] if (j, v, kb) in best),
+                                  default=math.inf)
         if op.group:
             members = [j for j, o in enumerate(T.ops) if o.group == op.group]
             done.update(members)
-            vals = space.slots[s].options
             lb = math.inf
-            for assign in itertools.product(vals, repeat=len(members)):
-                xb = [best_vec[(j, "xbar", 16)] for j, v in zip(members, assign) if v == "xbar"
-                      and (j, "xbar", 16) in best_vec]
-                rest = sum(best.get((j, v, 16), math.inf) for j, v in zip(members, assign) if v != "xbar")
-                lb = min(lb, rest + (float(T.w @ np.max(xb, axis=0)) if xb else 0.0))
+            for assign in itertools.product(space.slots[s].options, repeat=len(members)):
+                # Members on the crossbar add their max (per step); max over members of each
+                # one's cheapest weighted cost is below it for every hardware setting.
+                xb = [kb_min(j, v) for j, v in zip(members, assign) if v == "xbar"]
+                rest = sum(kb_min(j, v) for j, v in zip(members, assign) if v != "xbar")
+                lb = min(lb, rest + (max(xb) if xb else 0.0))
             parts[role] += lb
         elif s and space.slots[s].role == "attention":
             sl = space.slots[s]
@@ -876,6 +872,6 @@ def certificate(fe: FastEvaluator):
         else:
             done.add(i)
             vals = space.slots[s].options if s else ["cpu"]
-            parts[role] += min(best.get((i, v, kb), math.inf) for v in vals for kb in KNOBS["kv_bits"])
+            parts[role] += min(kb_min(i, v) for v in vals)
     floor = fe.tools_time + sum(parts.values())
     return floor, dict(parts)
