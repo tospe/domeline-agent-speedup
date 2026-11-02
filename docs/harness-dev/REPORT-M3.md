@@ -34,6 +34,8 @@ Skipped (as allowed): the session-varying policy.
 | Speed | exact `Evaluator` on the large space: **0.71 s/eval**. `FastEvaluator`: **4.3 ms/eval** for mapping moves, **6.0 ms** with random hardware every eval, 10 ms with cold tables. Max rel. diff vs exact: 2.2e-15 (8 random untied points, 2 past a wall). Same numbers, not an approximation beyond the replay's own sampled curves. |
 | Coupling | modeled: a lone offload adds one transfer in plus one per consumer of its output, and a launch + sync. 4 sign-flip examples found (below); effects are small |
 | DP | exact mapping optimum with hardware fixed: 11 s per hardware setting on the 36-layer model (4,860 states max, 1.5M transitions); equals brute force on a 2-layer instance (2 hardware settings, 15,552 mappings each) |
+| Uncapped optimum | the per-layer optimum at fixed hardware is (almost) the tied one: untying gains 0-0.28% (§4). **The large space adds no latency headroom without caps.** |
+| Single-knob climb | doesn't stall; 3.38x after 100k evals (105 per-layer moves), vs the walk's 9.42x in 31 on the small space (§4a) |
 | Certificate | floor 349.3 s (10.83x vs the 3080); Amdahl bound 227.0 s (16.66x). Sweep optimum 9.48x is **14.2%** above the floor |
 
 ## 2. What was built (files touched)
@@ -96,9 +98,8 @@ With mlp_norm on STAR too, x stays on the coprocessor and h2 goes to the crossba
 **This weakens a paper claim, so I'm flagging it:** the coupling exists, but its size is about
 1e-5 of the workload time per layer. A crossing costs microseconds (CXL: 1 µs launch, 1 µs sync,
 0.5 µs t0; a decode activation is 5 KB, 0.08 µs at 64 GB/s), against tens of µs per op. That is
-far below the walk's ε = 0.5%. So link coupling is not what will stall single-knob search in this
-model. What does stall it is granularity: one layer's move is 1/36 of a tied move, and almost
-every per-layer move gains less than 0.5% (§4).
+far below the walk's ε = 0.5%. So link coupling is not what slows single-knob search in this model.
+Granularity is: one layer's move is about 1/36 of a tied move (§4a).
 
 ## 4. Does the large space hold anything the small one does not?
 
@@ -121,8 +122,21 @@ the walk already finds it. Where per-layer choices do trade off is under a cap. 
 attention on the crossbar for some layers only (each layer's KV arrays cost area) or KV8 for some
 layers. Under a capacity limit, part of the KV on the VFU. The DP does not handle caps yet (Question 2).
 
-Single-knob climb on the large space (best improvement over all 626 knobs, accept if > 0.5%
-faster, from START): see §4a, filled in from the run below.
+### 4a. Single-knob climb on the large space
+
+Best-improvement climb over every single-knob move (one slot or one hardware knob, ~980 neighbors),
+accepting if > 0.5% faster, from START, budget 100,000 evaluations (310 s with the fast evaluator):
+
+- It **does not stall**. It ran out of budget at **3.38x** after 105 accepted moves, one layer at a
+  time (the last 12 accepted moves are `L<l>.rope=star`, one layer each, +1.3% each).
+- At the stop, the tied move "vector = STAR in every layer" would gain 64% in one step.
+- For comparison, the small-space walk reaches 9.42x in 31 evaluations.
+
+So on this workload the large space slows a single-knob searcher ~36x per unit of progress (each
+per-layer move clears ε because the host still dominates) rather than trapping it. A searcher that
+can make a coordinated move (the same role in every layer, or a window of neighbors) gets the
+small space's progress back. That is a concrete E5 hypothesis, and it cuts in favor of the
+supervisor's restructure step. It is not evidence that coupling stalls search.
 
 ## 5. Ground truth without a sweep
 
@@ -189,8 +203,12 @@ They are not caused by this branch. `test_m0_repro.py` (4) and `test_large_space
    A Lagrangian DP (minimize time + λ·area, sweep λ) gives exact points on the convex hull of the
    time–area front cheaply; an exact capped optimum needs an area dimension in the DP state. Want either?
 3. The coupling claim in the outline ("two link transfers ... is what should stall single-knob
-   search") does not hold at this model's link costs. The stall mechanism here is per-layer
-   granularity vs ε. Should E5 run with a per-layer ε (e.g. ε/36)? Or should the claim be reworded?
+   search") does not hold at this model's link costs (µs per crossing, ~1e-5 of workload time per
+   layer). What slows single-knob search is per-layer granularity: it keeps improving, ~36x slower
+   (§4a). Suggest rewording the claim to "single-knob search in the per-layer space needs about
+   L times more moves; coordinated (tied/window) moves recover it". Or do you want a workload or
+   link setting where coupling is large (e.g. a UPMEM-like link with t0 + α·N)? That is a different
+   tech library, so it is your call.
 4. `Chain` duplicates `Integrator.step`'s loop. The alternative is to refactor the integrator so both
    call one function. That edits integrator.py beyond plumbing, so I did not. The tests keep the two
    in sync.
