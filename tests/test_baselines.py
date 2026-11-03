@@ -161,3 +161,89 @@ def test_runner_shadow_mode(tmp_path):
 def test_unknown_method_fails_early():
     with pytest.raises(KeyError):
         hrun.main([str(ROOT / "experiments/h/h4.yaml"), "--methods", "no_such_method"])
+
+
+# ---------------------------------------------------------------------------
+# Pre-filter and the H5 fairness rows
+# ---------------------------------------------------------------------------
+
+def _samples(space, table, rng, n, base=None):
+    out = []
+    for _ in range(n):
+        if base is None:
+            p = {k: rng.choice(v) for k, v in table.items()}
+        else:
+            p = dict(base)
+            for k in rng.sample(list(table), rng.randint(1, 6)):
+                p[k] = rng.choice(table[k])
+        out.append(p)
+    return out
+
+
+@pytest.mark.parametrize("sampling", ["host", "any"])
+def test_prefilter_gives_identical_verdicts(env, sampling):
+    """Static checks first: same legal/illegal verdict as the full verify, rules a subset of its rules."""
+    import random as _r
+    S, L, train, _ = env
+    rng = _r.Random(7)
+    n_pre = 0
+    for space in (S, L):
+        table = B.knob_table(space)
+        base = B.start_point(space, table, hrun.WALK_POINT)
+        for p in _samples(space, table, rng, 120) + _samples(space, table, rng, 120, base):
+            full = verify_point(space, p, train, sampling=sampling)
+            pre = B.static_violations(space, p, sampling)
+            if pre:
+                n_pre += 1
+                assert not full.legal, p
+                assert {r for r, _, _ in pre} <= full.rules()
+                assert {(r, o) for r, o, _ in pre} <= {(v.rule, v.op) for v in full.violations}
+            fast = B.make_verifier(space, train, sampling=sampling, prefilter=True)(p)
+            assert fast["legal"] == full.legal
+    if sampling == "host":
+        assert n_pre > 100           # the pre-filter actually fires (uniform samples hit edge/sample = vfu)
+
+
+def test_start_walk_and_tied_moves(env):
+    S, L, train, g = env
+    table = B.knob_table(L)
+    p0 = B.start_point(L, table, hrun.WALK_POINT)
+    assert L.is_tied(p0) and L.key(p0) == L.key(L.tie(hrun.WALK_POINT))
+    groups = B.tied_groups(L, table)
+    assert set(groups) == {"mvm", "lm_head", "attention", "softmax", "vector", "edge", "kv_bits"}
+    assert len(groups["attention"]) == 36 and len(groups["kv_bits"]) == 36
+    tied = list(B.tied_neighbors(p0, table, groups))
+    assert tied and all(L.is_tied({**p0, **q}) for q in tied)
+    # Tied moves on a tied point stay tied, so they are exactly small-space moves lifted.
+    assert len({L.key(q) for q in tied}) == len(tied)
+    ev = FastEvaluator(L, train, g, budget=15)
+    gate = B.Gate(ev, B.make_verifier(L, train, prefilter=True))
+    B.hill_climb(gate, table, p0, seed=0, tol=0.0, groups=groups)
+    assert ev.log[0].speedup_vs_gpu == pytest.approx(9.4163, abs=1e-3) and ev.used <= 15
+    assert gate.best.time_s <= ev.log[0].time_s
+
+
+def test_dp_row_reads_c_format(tmp_path):
+    f = tmp_path / "dp.json"
+    f.write_text(json.dumps({"caps": [{"area_cap": float("inf"), "effort_cap": float("inf"), "bound_s": 300.0,
+                                       "best_time_s": 310.0},
+                                      {"area_cap": 5000.0, "effort_cap": float("inf"), "bound_s": 400.0,
+                                       "best_time_s": 420.0}]}))
+    cfg = {"reference": {"dp_file": str(f)}, "caps": {"area_mm2": 5000}}
+    assert hrun.dp_optimum_s(cfg) == 420.0 and hrun.dp_row(cfg)["bound_s"] == 400.0
+    assert hrun.dp_optimum_s({"reference": {"dp_file": str(f)}, "caps": {}}) == 310.0
+
+
+def test_config_verifier_on_off_are_strings(tmp_path):
+    """YAML reads `on`/`off` as booleans; the runner must still see the modes (and turn the verifier off)."""
+    f = tmp_path / "c.yaml"
+    f.write_text("verifier: on\n")
+    assert hrun.load_config(f)["verifier"] == "on"
+    assert hrun.load_config(f, ["verifier=off"])["verifier"] == "off"
+    assert hrun.load_config(f, ["verifier=shadow"])["verifier"] == "shadow"
+    rows = hrun.main([str(ROOT / "experiments/h/h4.yaml"), "--seeds", "0", "--budget", "40", "--methods", "random",
+                      "--set", "verifier=off", "--out", str(tmp_path)])
+    assert rows[0]["illegal"] is None and "verify_calls" not in rows[0]
+    rows = hrun.main([str(ROOT / "experiments/h/h4.yaml"), "--seeds", "0", "--budget", "40", "--methods", "random",
+                      "--out", str(tmp_path)])
+    assert rows[0]["verify_calls"]["prefiltered"] > 0       # the pre-filter is on by default with verifier: on

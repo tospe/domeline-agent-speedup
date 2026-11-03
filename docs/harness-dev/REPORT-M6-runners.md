@@ -154,3 +154,103 @@ rejected as slower or infeasible anyway. The test on the small space finds the s
 ## 6. Questions
 1. H5 fairness (§3.2): which of rows (a)/(b)/(c) should the paper's large-space comparison include?
 2. C's `dp_caps_<tag>.json` format: I read `d[<cap key>]["time_s"]`. Tell me or C the real keys and I'll match them.
+
+## 7. Round 2: H5 fairness rows, pre-filter, DP file format (after merging autopilot c443d44)
+
+### 7.1 The three rows (`experiments/h/h5_fair.yaml`, `results/h/h5_fair/`)
+
+Same space, sessions, budgets (3,000; TPE 1,000) and verifier (on, sampling=host) as h5.yaml, seeds 0–2.
+
+| row | method | best (3 seeds) | 1% band of 9.4684× first at | best@100 / @300 / @1000 | pick area (mm²) |
+|---|---|---|---|---|---|
+| ref | team (det, h5) | 9.457 ×3 | 274 | 5.43 / – / 9.457 | 9,729 |
+| (a) | SA from the walk's design | 9.416 ×3 (= start) | 1 (the start) | never improves | 9,729 |
+| (a) | hill from the walk's design | **9.468 ×3** | 1 (the start) | 9.416 / 9.416 / 9.467–9.468 | **5,833** |
+| (b) | SA, tied + per-slot moves | 9.468 / 9.468 / 9.457 | 1,274 / 1,693 / 1,892 | 0.7–7.3 / 2.7–7.3 / 2.8–9.0 | 8,749–11,665 |
+| (b) | hill, tied + per-slot moves | 9.468 / 9.457 / 9.468 | 1,434 / 2,926 / 1,593 | 0.04 / 0.05–0.06 / 0.12–8.47 | 11,270–18,612 |
+| (b) | **TPE over the tied subspace, then per-slot hill** | **9.468 ×3** | **83 / 56 / 88** | 9.468 / 9.468 / 9.468 | **5,833** |
+| (c) | hill, tol 0, from START | 6.78 / 5.30 / 5.33 | – | 0.04–0.05 / 0.05 / 0.22–0.33 | |
+
+**The comparison changes, and this matters for the paper.** Once a baseline gets the tied (small-space) moves, the large
+space stops favouring the team.
+- **TPE on the tied subspace** reaches 9.468× in 56–88 evaluations. That is 3–5× fewer evaluations than the
+  deterministic team needs for 9.457× (274).
+- **The hill climb from the walk's design** reaches 9.468× too (by eval ~1,000; it stops at 1,391–1,671).
+- **The 9.468× / 5,833 mm² design that both pick is not a per-layer design.** I checked: it is tied, and it is a
+  small-space design, the walk's design plus `link: die` and `xbar_tile: lean`. It costs **18 months against the walk's
+  7**. H4's SA seed 0 found the same point in the small space. docs/results.md already lists it as the area front's
+  "5,833 mm², 9.47×, lean tile" row, and its point 4 says the walk's shrink drops the die link deliberately. So this
+  is the known area/effort trade, not a miss by the walk. These baselines pick it because `ev.best()` breaks ties
+  within 1% by area before effort. Under an effort cap of 7 months it would be infeasible.
+- SA from the walk's design never improves on it. At T0 = 5% it drifts away and does not come back within the budget.
+- With tied moves, SA and hill get there too, slowly (1.3k–2.9k evaluations).
+- `tol: 0` explains most of the plain hill climb's failure in h5: 0.8× becomes 5.3–6.8×. The 0.5% acceptance
+  threshold blocks the per-layer gains (each worth ~1/36 of a full move). It still never reaches the band.
+
+What I take from this, for you to judge:
+- The uncapped large space does **not** show "simple search stalls" once the baseline has coordinated (tied) moves.
+  This agrees with M3: untying gains 0–0.28% uncapped. The team's advantage in h5 came from coordinated moves, not
+  from the readings.
+- The comparison that can still separate the methods is the **capped** one (H5 capped, C's DP). The h5_fair rows run
+  under caps unchanged: `--set caps.area_mm2=5000 --set experiment=h5_fair_a5000 --set reference.dp_file=...`.
+- "Best" for every row is 9.4683×, the same as the 14-knob space's legal optimum (9.4684×). No row found a per-layer
+  design faster than the tied optimum.
+
+Note on the 1% band: the walk's design is already in the band (9.416 ≥ 0.99 × 9.4684), so row (a) is in it from
+eval 1 by construction.
+
+Implementation:
+- `sa`/`hill` take `start:` (`walk`, or a small or large point; a small point is tied) and `tied: true` (adds
+  `tied_neighbors`: one move per (role, value) that sets every slot of a role, i.e. a small-space move lifted).
+  SA picks a tied move with p = 0.5, because there are ~15 tied moves against ~1,300 single-slot moves.
+- `tied_tpe`: TPE has no notion of a move, so it runs in two phases. Phase 1 is TPE over the tied subspace (hardware
+  + 7 role knobs) for half the budget; phase 2 is a hill climb with single-slot and tied moves from TPE's best.
+- `tol` was already a hill-climb keyword.
+- Tests (`test_start_walk_and_tied_moves`): the tied start equals `tie(walk)` and times at 9.4163×; tied moves keep a
+  tied point tied; one tied group per role, 36 slots each for attention and KV bits.
+
+### 7.2 Pre-filter (`baselines.static_violations`, `make_verifier(..., prefilter=True)`)
+
+The checks that depend only on the placement:
+- R1.support for every op;
+- R1.sampling for `sample`;
+- R2.transfer for the token in and out (sampling=host).
+
+They use the same tests as `verify._r1` / `_r2_static`, with a dict lookup per op and no design or integrator. If any
+fires, the point is illegal and the full verify is skipped. The legal/illegal verdict is the full verifier's; the
+violation list is the static subset, flagged `"prefilter": True`. Shadow mode always runs the full verify, so H6 rule
+counts are complete.
+- **Identical verdicts, tested:** `test_prefilter_gives_identical_verdicts`, sampling host and any; 480 points per run,
+  uniform and walk-local, small and large space. Every pre-filter hit is full-verify illegal, its (rule, op) pairs are
+  a subset of the full ones, and the gated verdict equals the full one on every point.
+- **End to end:** random seed 0 on h5 with the pre-filter gives an **identical 3,000-evaluation sequence**
+  (points and times) and the same 14,984 illegal proposals. 13,478 of 17,985 verifies were pre-filtered, and wall time
+  fell from **1,442 s to 325 s** (`results/h/h5_prefilter_check/`).
+- It is on by default (`prefilter: true`, verifier: on only).
+
+**Bug found and fixed in passing: YAML reads `verifier: on` as `True` and `off` as `False`.** As a result, the
+pre-filter never switched on: the h5_fair runs above used the full verify, which gives the same verdicts, so their
+results stand. `verifier: off` would also have left the verifier on, since `False != "off"`. No committed config used
+`off` (H6 uses `shadow`), so no committed result is affected. `hrun.normalize` now maps the booleans back to modes,
+and a test checks that `off` really evaluates without verifying and that `on` enables the pre-filter.
+
+### 7.3 dp_caps format (from C's committed `experiments/dp_caps.py` in .worktrees/m6-dp, 98bd8a6)
+
+`{"caps": [{"area_cap", "effort_cap", "bound_s", "best_time_s", "gap", "speedup", "point", ...}], "dp_floor_s", ...}`.
+`hrun.dp_row(cfg)` picks the row whose caps equal the run's `caps:`, where an absent cap means inf. `gap_dp` is measured
+against `best_time_s` (the best design C found) and the new `gap_dp_bound` against `bound_s` (C's lower bound).
+`test_dp_row_reads_c_format` covers it. Only smoke files exist so far; once `dp_caps_main.json` lands, set
+`reference.dp_file: results/large/dp_caps_main.json`.
+
+### 7.4 Files and tests (round 2)
+- Changed: `harness/baselines.py` (tied moves, `start`, `tied_tpe`, pre-filter), `experiments/hrun.py` (method options,
+  `tied_tpe`, the pre-filter wiring, the dp_caps reader, `normalize`), `tests/test_baselines.py` (+5 tests).
+- New: `experiments/h/h5_fair.yaml`, `results/h/h5_fair/`, `results/h/h5_prefilter_check/`.
+- `tests/test_baselines.py`: 21 passed. Full suite: 117 passed, 3 failed (only the pre-existing `test_claims` ones).
+
+### 7.5 Questions
+1. Given 7.1, should H5's headline be the capped comparison, with the uncapped rows kept as "the large space adds
+   nothing without caps"? That is consistent with your E5/H5 note.
+2. The H4/H5 tables compare picks under `ev.best()` (area first, then effort). The baselines' 5,833 mm² picks cost 18
+   months and the walk's cost 7. Should the runner's summary also report the pick under an effort-first tie-break, or
+   should every H run carry an effort cap? Otherwise a reader may take "smaller pick" for "better design".

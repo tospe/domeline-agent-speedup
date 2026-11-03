@@ -18,6 +18,9 @@ Config (YAML; every key can be overridden with --set, values parsed as YAML):
   exclude: {edge: [vfu]}       values no method may set (team: team_search exclude; baselines: removed)
   reference: {speedup: 9.4684, dp_opt_s: null, dp_file: null}
                                first-1%-band reference and the DP optimum (seconds) if known
+  prefilter: true              static placement checks before the full verify (verifier: on only;
+                               same legal/illegal verdicts, tested; the violation list is then the
+                               static subset). Shadow mode always runs the full verify.
   compress: auto               write records as .json.gz (auto: on the large space, ~17 KB per eval raw)
   plugins: [harness.llm_agents]   modules imported first, so their @method registrations exist
   methods:                     names from the registry or "module:function", plain or with kwargs:
@@ -54,7 +57,7 @@ from harness.tools import RunRecord, Toolbox  # noqa: E402
 DEFAULTS = {"experiment": "scratch", "space": "small", "evaluator": "fast", "sessions": "search", "budget": 100,
             "seeds": [0], "caps": {}, "verifier": "on", "sampling": "host", "exclude": {},
             "reference": {"speedup": 9.4684, "dp_opt_s": None, "dp_file": None}, "plugins": [], "methods": [],
-            "compress": "auto"}
+            "compress": "auto", "prefilter": True}
 CHECKPOINTS = (10, 20, 30, 50, 100, 200, 300, 500, 1000, 2000, 3000, 5000, 10000, 30000, 100000)
 METHODS: Dict[str, Callable] = {}
 
@@ -151,8 +154,9 @@ def run_one(cfg, mspec, seed) -> Dict:
     fn = resolve(name)
     env = build_env(cfg)
     ev = make_evaluator(env, cfg, budget)
-    verifier = None if cfg["verifier"] == "off" else B.make_verifier(env.space, env.sessions,
-                                                                   sampling=cfg["sampling"])
+    verifier = None if cfg["verifier"] == "off" else B.make_verifier(
+        env.space, env.sessions, sampling=cfg["sampling"],
+        prefilter=cfg.get("prefilter", True) and cfg["verifier"] == "on")
     shadow = None
     if cfg["verifier"] == "shadow":
         shadow = ev = B.VerifiedEvaluator(ev, verifier)
@@ -174,6 +178,8 @@ def run_one(cfg, mspec, seed) -> Dict:
     if shadow is not None:
         best = ev.best()
         m["shadow"] = shadow.summary([a["n"] for a in rec.accepted if "n" in a], best.n if best else None)
+    if verifier is not None and hasattr(verifier, "stats"):
+        m["verify_calls"] = dict(verifier.stats)
     rec_json.update(metrics=m, extra=run.extra)
     out = Path(cfg["out"]) / cfg["experiment"] / f"{label}_s{seed}.json"
     out.parent.mkdir(parents=True, exist_ok=True)
@@ -192,14 +198,21 @@ def dp_optimum_s(cfg):
     ref = cfg.get("reference") or {}
     if ref.get("dp_opt_s"):
         return float(ref["dp_opt_s"])
-    f = ref.get("dp_file")
-    if f and Path(ROOT / f).exists():
-        # Agent C's results/large/dp_caps_<tag>.json; read leniently until its format is fixed.
-        d = json.loads(Path(ROOT / f).read_text())
-        key = cfg.get("dp_key", "uncapped")
-        row = d.get(key) if isinstance(d, dict) else None
-        if isinstance(row, dict):
-            return row.get("time_s")
+    row = dp_row(cfg)
+    return row["best_time_s"] if row else None
+
+
+def dp_row(cfg):
+    """The row of C's results/large/dp_caps_<tag>.json (experiments/dp_caps.py) for this run's caps:
+    {"caps": [{"area_cap", "effort_cap", "bound_s", "best_time_s", "gap", "speedup", "point", ...}]}.
+    bound_s is the DP's lower bound at the cap, best_time_s the best design found (re-evaluated)."""
+    f = (cfg.get("reference") or {}).get("dp_file")
+    if not f or not (ROOT / f).exists():
+        return None
+    area, effort = _caps(cfg)
+    for r in json.loads((ROOT / f).read_text()).get("caps", []):
+        if float(r["area_cap"]) == area and float(r["effort_cap"]) == effort:
+            return r
     return None
 
 
@@ -225,6 +238,9 @@ def metrics(ev, rec, gate, env, cfg, budget, wall) -> Dict:
         dp = dp_optimum_s(cfg)
         if dp:
             m["gap_dp"] = best.time_s / dp - 1
+        row = dp_row(cfg)
+        if row and row.get("bound_s"):
+            m["gap_dp_bound"] = best.time_s / row["bound_s"] - 1
     run_best = None
     for c in CHECKPOINTS:
         if c > max(budget if math.isfinite(budget) else 0, ev.used):
@@ -287,14 +303,39 @@ def m_tpe(run: Run, **kw):
     B.tpe_search(run.gate, run.table, seed=run.seed, **kw)
 
 
+# The walk's design (results/search/main.json, walk seed 0): `start: walk` ties it on the large space.
+WALK_POINT = {"mvm": "xbar", "lm_head": "xbar", "attention": "xbar", "xbar_tech": "xbar_transpose",
+              "softmax": "star", "vector": "star", "edge": "cpu", "xbar_scale": 1.0, "vfu_units": 1,
+              "vfu_bw": 64e9, "vfu_mem": 4e9, "star_units": 64, "link": "cxl", "kv_bits": 8,
+              "xbar_tile": "isaac", "adc_per_ima": 8, "cell_bits": 2}
+
+
+def _start(run, start):
+    if start == "walk":
+        start = WALK_POINT
+    return B.start_point(run.space, run.table, start)
+
+
 @method("sa")
-def m_sa(run: Run, **kw):
-    B.anneal(run.gate, run.table, B.start_point(run.space, run.table), seed=run.seed, **kw)
+def m_sa(run: Run, start=None, tied=False, **kw):
+    """SA from START (or start: walk | a point); tied: add tied moves to the neighbourhood."""
+    groups = B.tied_groups(run.space, run.table) if tied else None
+    B.anneal(run.gate, run.table, _start(run, start), seed=run.seed, groups=groups, **kw)
 
 
 @method("hill")
-def m_hill(run: Run, **kw):
-    B.hill_climb(run.gate, run.table, B.start_point(run.space, run.table), seed=run.seed, **kw)
+def m_hill(run: Run, start=None, tied=False, **kw):
+    """Hill climb from START (or start: walk | a point); tied: add tied moves; tol: 0 for any improvement."""
+    groups = B.tied_groups(run.space, run.table) if tied else None
+    B.hill_climb(run.gate, run.table, _start(run, start), seed=run.seed, groups=groups, **kw)
+
+
+@method("tied_tpe")
+def m_tied_tpe(run: Run, **kw):
+    """TPE over the tied subspace, then per-slot + tied hill climb (large space; baselines.tied_tpe)."""
+    if not B.is_large(run.space):
+        raise ValueError("tied_tpe is for the large space")
+    B.tied_tpe(run.gate, run.space, run.table, seed=run.seed, **kw)
 
 
 # ---------------------------------------------------------------------------
@@ -311,12 +352,24 @@ def load_config(path=None, overrides=()):
             cur = cur.setdefault(p, {})
         cur[parts[-1]] = yaml.safe_load(v)
     cfg.setdefault("out", str(ROOT / "results/h"))
+    return normalize(cfg)
+
+
+def normalize(cfg):
+    """YAML 1.1 reads `on`/`off` as booleans: map them back to the verifier's mode names."""
+    v = cfg.get("verifier")
+    if v is True or v is None:
+        cfg["verifier"] = "on"
+    elif v is False:
+        cfg["verifier"] = "off"
+    if cfg["verifier"] not in ("on", "off", "shadow"):
+        raise ValueError(f"verifier: {cfg['verifier']!r} (on | off | shadow)")
     return cfg
 
 
 SUMMARY_COLS = ["method", "seed", "evals", "budget", "best_speedup", "best_eval", "first_1pct_eval", "pick_speedup",
                 "pick_area_mm2", "pick_effort_months", "gap_certificate", "gap_dp", "proposals", "illegal",
-                "wall_s", "eval_wall_s", "tokens_in", "tokens_out", "stop"]
+                "wall_s", "eval_wall_s", "tokens_in", "tokens_out", "gap_dp_bound", "stop"]
 
 
 def _job(a):
