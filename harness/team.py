@@ -117,6 +117,54 @@ class AgentContext:
     budget_left: float = math.inf
 
 
+@dataclass
+class SupervisorContext:
+    """What a supervisor sees when the loop escalates (AGENT_IFACE.md, H9)."""
+    trigger: str                 # "stall" | "exhausted"
+    point: Dict
+    reading: Dict
+    knobs: Dict[str, list]       # every knob/slot -> options (a supervisor move may span roles)
+    owners: Dict[str, str]       # knob/slot -> owning role
+    coordinated: List[Move]      # the deterministic restructure candidates (tie / window)
+    singles: List[Move]          # this round's role-agent candidates
+    history: List[Dict]
+    accepted: List[Dict]
+    escalation: int = 0
+    feedback: Optional[List] = None
+    budget_left: float = math.inf
+
+
+try:
+    from typing import Protocol
+except ImportError:          # pragma: no cover
+    Protocol = object
+
+
+class Supervisor(Protocol):
+    name: str
+    record: Any
+
+    def restructure(self, ctx: SupervisorContext) -> List[Move]: ...
+
+
+def all_knobs(space):
+    """Every knob/slot -> options (the union of the roles' knobs)."""
+    out = {}
+    for r in ROLES:
+        out.update(own_knobs(space, r))
+    return out
+
+
+def _token_delta(before, after):
+    out = {}
+    for m, t in after.items():
+        b = before.get(m, {})
+        d = {k: v - b.get(k, 0) for k, v in t.items()}
+        if any(d.values()):
+            out[m] = d
+    return out
+
+
 # ---------------------------------------------------------------------------
 # Space helpers (small Space or LargeSpace)
 # ---------------------------------------------------------------------------
@@ -462,12 +510,14 @@ class TeamResult:
     proposals: int = 0
     rejected: Dict[str, int] = field(default_factory=dict)  # outcome -> count
     restructures: int = 0
+    escalations: List[Dict] = field(default_factory=list)   # supervisor calls (H9)
 
 
 def team_search(ev, toolbox, agents: Dict[str, Any], *, start=None, eps=0.005, stall_k=None,
                 stall_gap=0.02, stop_frac=0.02, budget=None, record=None, retry_budget=2,
                 coordinate="stall", window=1, exclude: Optional[Dict[str, set]] = None,
-                shrink=True, shrink_tol=0.01, history_len=20, max_rounds=50) -> TeamResult:
+                shrink=True, shrink_tol=0.01, history_len=20, max_rounds=50,
+                supervisor=None, max_escalations=5) -> TeamResult:
     """The team loop (brief §M5 steps 1-5). Returns the final design and what happened.
 
     ev, toolbox  the Evaluator (its budget counts evaluations) and the M4 Toolbox (read, verify, log)
@@ -481,6 +531,9 @@ def team_search(ev, toolbox, agents: Dict[str, Any], *, start=None, eps=0.005, s
     coordinate   "stall" (coordinated moves on stall and at the end of a fruitless round),
                  "first" (before the agents' single moves every round), "never"
     exclude      knob or slot -> values no move may set (e.g. {"edge": {"vfu"}, "sample": {"vfu"}})
+    supervisor   H9: a Supervisor (`.restructure(SupervisorContext) -> [Move]`) or a callable; called on
+                 stall (instead of the deterministic restructure) and before stopping for lack of moves,
+                 at most max_escalations times. None = the M5 loop, unchanged.
     """
     space = ev.space
     if budget is not None:
@@ -491,6 +544,17 @@ def team_search(ev, toolbox, agents: Dict[str, Any], *, start=None, eps=0.005, s
     for a in agents.values():
         if getattr(a, "record", "absent") is None:
             a.record = record
+    if record is not None and record.clock is None:
+        record.clock = lambda: ev.used
+    sup_fn = None
+    if supervisor is not None:
+        if getattr(supervisor, "record", "absent") is None:
+            supervisor.record = record
+        sup_fn = getattr(supervisor, "restructure", supervisor)
+        sup_name = getattr(supervisor, "name", getattr(sup_fn, "__name__", "supervisor"))
+        sup_rec = getattr(supervisor, "record", None) or record
+        knobs_all = all_knobs(space)
+        owners_all = {k: owner_of(k, space) for k in knobs_all}
     history: List[Dict] = []
     res = TeamResult(final=None, stop="")
 
@@ -515,6 +579,82 @@ def team_search(ev, toolbox, agents: Dict[str, Any], *, start=None, eps=0.005, s
 
     def excluded(m):
         return any(v in exclude.get(k, ()) for k, v in m.changes.items())
+
+    def sup_active():
+        return sup_fn is not None and len(res.escalations) < max_escalations
+
+    def escalate(trigger, cur, reading, singles, coord, tried):
+        """One supervisor escalation: ask, verify, evaluate in order; retry on illegal moves.
+        Returns (Move, Eval, verdict, "supervisor") on an accept, else None."""
+        import copy
+        import time as _time
+        t0 = _time.time()
+        before = copy.deepcopy(sup_rec.tokens) if sup_rec is not None else {}
+        entry = {"n": len(res.escalations), "trigger": trigger, "eval_n": ev.used, "supervisor": sup_name,
+                 "binding_term": reading.get("binding_term"), "time_s": cur.time_s, "moves": [], "outcomes": [],
+                 "accepted": False, "calls": 0}
+        res.escalations.append(entry)
+        res.restructures += 1
+        ctx = SupervisorContext(trigger=trigger, point=cur.point, reading=reading, knobs=knobs_all,
+                                owners=owners_all, coordinated=list(coord), singles=list(singles),
+                                history=list(history), accepted=[dict(a) for a in res.accepted],
+                                escalation=entry["n"], budget_left=ev.budget - ev.used)
+        toolbox.log({"kind": "escalation", "trigger": trigger, "n": entry["n"]})
+        out = None
+        try:
+            for attempt in range(retry_budget + 1):
+                entry["calls"] += 1
+                moves = list(sup_fn(ctx) or [])
+                if not moves:
+                    break
+                illegal = None
+                for m in moves:
+                    m.agent = "supervisor"
+                    entry["moves"].append(dict(m.changes))
+                    if excluded(m):
+                        note("excluded", m)
+                        entry["outcomes"].append("excluded")
+                        continue
+                    q = {**cur.point, **m.changes}
+                    k = space.key(q)
+                    if k in tried or k == space.key(cur.point):
+                        note("duplicate", m)
+                        entry["outcomes"].append("duplicate")
+                        continue
+                    tried.add(k)
+                    verdict = None
+                    if toolbox.verifier is not None:
+                        v = toolbox.verify(q)
+                        verdict = {"legal": v["legal"], "violations": v.get("violations", [])}
+                        if not v["legal"]:
+                            note("illegal", m, violations=verdict["violations"])
+                            entry["outcomes"].append("illegal")
+                            illegal = verdict["violations"]
+                            continue
+                    e = ev(q)
+                    why = m.why
+                    if not e.feasible and e.wall_ctx is None and e.time_s < cur.time_s * (1 - eps):
+                        e, paid = _repair_area(ev, e)
+                        if paid:
+                            why += "; area paid by " + paid
+                    if better(e, cur, eps):
+                        entry["outcomes"].append("accepted")
+                        entry["accepted"] = True
+                        out = (Move(dict(m.changes), why=why, agent="supervisor"), e, verdict, "supervisor")
+                        return out
+                    note("slower" if e.feasible else "infeasible", m, e)
+                    entry["outcomes"].append("slower" if e.feasible else "infeasible")
+                if illegal is None:
+                    break
+                ctx.feedback = illegal
+                ctx.history = list(history)
+                ctx.budget_left = ev.budget - ev.used
+            return out
+        finally:
+            entry["wall_s"] = _time.time() - t0
+            entry["tokens"] = _token_delta(before, sup_rec.tokens) if sup_rec is not None else {}
+            if record is not None:
+                record.escalations.append(entry)
 
     cur = None
     try:
@@ -602,11 +742,19 @@ def team_search(ev, toolbox, agents: Dict[str, Any], *, start=None, eps=0.005, s
                     break
                 note("slower" if e.feasible else "infeasible", m, e)
                 since_accept += 1
+                if stall_k and since_accept >= stall_k and gap > stall_gap and sup_active():
+                    since_accept = 0
+                    accepted = escalate("stall", cur, reading, singles, coord, tried)
+                    if accepted is not None:
+                        break
+                    continue
                 if stall_k and since_accept >= stall_k and gap > stall_gap and pending_coord:
                     res.restructures += 1
                     queue[i:i] = [(c, "restructure", None) for c in pending_coord]
                     pending_coord = []
                     since_accept = 0
+            if sup_active():
+                pending_coord = []        # the supervisor replaces the deterministic restructure (until its cap)
             if accepted is None and pending_coord:
                 # The agents' moves are exhausted: the supervisor restructures before giving up.
                 res.restructures += 1
@@ -638,6 +786,16 @@ def team_search(ev, toolbox, agents: Dict[str, Any], *, start=None, eps=0.005, s
             if cands and rnd < max_rounds and any(not isinstance(a, RuleAgent) for a in agents.values()):
                 rnd += 1          # non-rule agents may propose something new next round
                 continue
+            if sup_active():
+                accepted = escalate("exhausted", cur, reading, singles, coord, tried)
+                if accepted is not None:
+                    m, e, verdict, term = accepted
+                    note("accepted", m, e)
+                    on_accept(m, e, verdict, term, reading)
+                    cur = e
+                    rnd = 0
+                    since_accept = 0
+                    continue
             res.stop = "no move on any binding term improves the design"
             break
         if shrink and cur.feasible:
@@ -648,3 +806,97 @@ def team_search(ev, toolbox, agents: Dict[str, Any], *, start=None, eps=0.005, s
     if record is not None:
         record.stop = res.stop
     return res
+
+
+# ---------------------------------------------------------------------------
+# Ensemble (H9 R5): independent runs, best of
+# ---------------------------------------------------------------------------
+
+def _final_key(rec):
+    f = rec.get("final") or {}
+    return f.get("time_s", math.inf) if f.get("feasible") else math.inf
+
+
+def merge_records(records: List[Dict], seeds=None) -> Dict:
+    """Merge independent members' RunRecord JSONs into one record (AGENT_IFACE.md, H9 ensemble).
+
+    Evaluations are interleaved round-robin (members advance in lockstep), renumbered 1..N and
+    tagged with `member`; token_log eval_n values are mapped to that merged count."""
+    if not records:
+        raise ValueError("no members")
+    best = min(range(len(records)), key=lambda i: (_final_key(records[i]), i))
+    # Round-robin interleave; pos[(member, local n)] = merged n.
+    evals, pos = [], {}
+    queues = [list(r.get("evaluations", [])) for r in records]
+    idx = [0] * len(records)
+    while any(idx[i] < len(q) for i, q in enumerate(queues)):
+        for i, q in enumerate(queues):
+            if idx[i] < len(q):
+                e = dict(q[idx[i]])
+                idx[i] += 1
+                local = e.get("n", idx[i])
+                e["member_n"] = local
+                e["member"] = i
+                e["n"] = len(evals) + 1
+                pos[(i, local)] = e["n"]
+                evals.append(e)
+
+    def merged_n(i, local):
+        if local is None:
+            return None
+        if (i, local) in pos:
+            return pos[(i, local)]
+        # A call before the member's first evaluation (or between): the last merged n at or before it.
+        prior = [pos[(i, n)] for (j, n) in pos if j == i and n <= local]
+        return max(prior) if prior else 0
+
+    tokens, token_log = {}, []
+    for i, r in enumerate(records):
+        c = r.get("cost", {})
+        for m, t in (c.get("tokens") or {}).items():
+            acc = tokens.setdefault(m, {})
+            for k, v in t.items():
+                acc[k] = acc.get(k, 0) + v
+        for t in c.get("token_log") or []:
+            token_log.append({**t, "member": i, "member_eval_n": t.get("eval_n"),
+                              "eval_n": merged_n(i, t.get("eval_n"))})
+    token_log.sort(key=lambda t: (math.inf if t["eval_n"] is None else t["eval_n"], t["member"]))
+    walls = [r.get("cost", {}).get("wall_s", 0.0) for r in records]
+    out = {"experiment": records[0].get("experiment"),
+           "method": f"ensemble[{records[0].get('method')}]",
+           "seed": list(seeds) if seeds is not None else [r.get("seed") for r in records],
+           "config": {"members": len(records), "member_config": records[0].get("config")},
+           "stop": f"best of {len(records)}: member {best} ({records[best].get('stop')})",
+           "cost": {"evaluations": sum(r.get("cost", {}).get("evaluations", 0) for r in records),
+                    "wall_s": max(walls), "wall_s_sum": sum(walls),
+                    "eval_wall_s": sum(r.get("cost", {}).get("eval_wall_s", 0.0) for r in records),
+                    "tokens": tokens, "token_log": token_log},
+           "evaluations": evals,
+           "accepted": records[best].get("accepted", []),
+           "escalations": [dict(x, member=i) for i, r in enumerate(records) for x in r.get("escalations", [])],
+           "log": [],
+           "final": records[best].get("final"),
+           "best_member": best,
+           "members": records}
+    if all("cost_usd" in r for r in records):
+        cu = [r["cost_usd"] for r in records]
+        if all(isinstance(x, dict) for x in cu):
+            tot = {}
+            for x in cu:
+                for k, v in x.items():
+                    if isinstance(v, (int, float)):
+                        tot[k] = tot.get(k, 0.0) + v
+            out["cost_usd"] = tot
+        else:
+            out["cost_usd"] = sum(cu)
+    return out
+
+
+def ensemble(run_one: Callable[[int], Dict], seeds: List[int], *, workers=None, executor="thread") -> Dict:
+    """Run independent members in parallel (run_one(seed) -> RunRecord JSON) and merge them, best of."""
+    from concurrent.futures import ProcessPoolExecutor, ThreadPoolExecutor
+    seeds = list(seeds)
+    Pool = ProcessPoolExecutor if executor == "process" else ThreadPoolExecutor
+    with Pool(max_workers=workers or len(seeds)) as pool:
+        records = list(pool.map(run_one, seeds))
+    return merge_records(records, seeds)
