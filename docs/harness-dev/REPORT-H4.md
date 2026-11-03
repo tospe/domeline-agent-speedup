@@ -40,8 +40,9 @@ Both use B's `hrun.py` with methods given as `harness.llm_agents:h_team|h_single
 ## 1. Seed 0 results (all methods, budget 50, small space, verifier on, sampling rule = host)
 
 Records: `results/h/h4_llm/<method>_s0.json`, `results/h/h4_llm_local/<method>_s0.json`, plus `summary.csv`
-in each directory. Gap = target / best − 1. 9.4684x is the fastest legal design of the sweep;
-9.4847x is the sweep optimum without the verifier.
+in each directory. Gap = target / best − 1. 9.4684x is the fastest legal design of the sweep (h4.yaml's
+reference, REPORT-M2); 9.4847x is the second target the lead gave (I take it to be the sweep optimum without
+the verifier, but have not checked that).
 
 | method | model | best | gap to 9.4684 | gap to 9.4847 | 1% band at eval | evals used | best at eval | proposals / illegal | LLM calls | tokens in / out | wall | stop |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|
@@ -68,9 +69,10 @@ methods give the same result for every seed). 1% band at eval: walk 20, determin
 
 ## 2. What seed 0 says (one seed; not yet a result)
 
-- **Every Claude method reaches the legal optimum on the small space**, and the gap to 9.4847 is the
-  verifier's 0.17% (the faster design needs sampling or embed on PIM, which the host sampling rule
-  forbids). On this space the LLM methods differ only in cost.
+- **Every Claude method reaches the legal optimum on the small space** (best = 9.4684x exactly in all
+  8 runs), 0.17% below 9.4847x. Since every run stops at the same design, I read the 0.17% as the
+  verifier's price, not as a search gap; I have not checked which rule the 9.4847x design breaks. On this
+  space the LLM methods differ only in cost.
 - **The cheapest and fastest are the single agents.** The single agent with readings reaches the 1% band
   at eval 6 (Sonnet) and 8 (Haiku); without readings, at 7 and 11. Both are ahead of the walk (20), the
   deterministic team (15) and TPE (47–99), at 78–246k input tokens.
