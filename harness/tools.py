@@ -87,21 +87,31 @@ class RunRecord:
     tokens: Dict[str, Dict[str, int]] = field(default_factory=dict)   # model -> {"in", "out"}
     final: Optional[Dict] = None
     stop: str = ""
+    escalations: List[Dict] = field(default_factory=list)   # team_search supervisor calls (H9)
+    token_log: List[Dict] = field(default_factory=list)     # every add_tokens call, with eval_n
+    clock: Optional[Callable[[], int]] = None                # evaluations used so far (team_search sets it)
 
     def accept(self, move, reading, e: Eval, verdict=None):
         self.accepted.append({"move": move, "reading": reading, "verify": verdict, **eval_summary(e)})
 
-    def add_tokens(self, model, n_in, n_out):
+    def add_tokens(self, model, n_in, n_out, **extra):
+        """Count one LLM call's tokens. Extra counts (e.g. cache_read, cache_write) are summed per model too."""
         t = self.tokens.setdefault(model, {"in": 0, "out": 0})
         t["in"] += n_in
         t["out"] += n_out
+        for k, v in extra.items():
+            if isinstance(v, (int, float)):
+                t[k] = t.get(k, 0) + v
+        self.token_log.append({"model": model, "in": n_in, "out": n_out,
+                               "eval_n": self.clock() if self.clock else None, **extra})
 
     def to_json(self, ev: Evaluator, tb: Optional[Toolbox] = None) -> Dict:
         best = ev.best()
         return {"experiment": self.experiment, "method": self.method, "seed": self.seed,
                 "config": self.config, "stop": self.stop,
                 "cost": {"evaluations": ev.used, "wall_s": time.time() - self.t0,
-                         "eval_wall_s": ev.wall_s, "tokens": self.tokens},
+                         "eval_wall_s": ev.wall_s, "tokens": self.tokens, "token_log": self.token_log},
+                "escalations": self.escalations,
                 "evaluations": [{"point": e.point, **eval_summary(e)} for e in ev.log],
                 "accepted": self.accepted, "log": tb.entries if tb else [],
                 "final": self.final or ({"point": best.point, **eval_summary(best)} if best else None)}

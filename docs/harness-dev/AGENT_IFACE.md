@@ -151,3 +151,10 @@ def ensemble(run_one: Callable[[int], Dict], seeds: List[int], *, workers=None,
     with `member`. So "eval of first 1% band" on the merged record counts total evaluations spent by all members.
     Under the same lockstep rule, `token_log` eval_n values are remapped to that merged count.
   - `cost_usd`: summed over members if every member has one (A's field).
+
+Notes added after implementing (C):
+- An accepted supervisor move appears in `TeamResult.accepted` / `RunRecord.accepted` with `agent="supervisor"`
+  and `term="supervisor"`. The deterministic restructure uses `term="restructure"`. The "start" entry also says
+  `agent="supervisor"` (M5 legacy), so count escalation accepts by `term`, or by `escalations[i]["accepted"]`.
+- `max_escalations` counts escalations, not calls. A retry after an illegal move is the same escalation;
+  see `calls` in its record.
