@@ -1,0 +1,5095 @@
+{
+ "experiment": "h4_llm",
+ "method": "eat_sonnet",
+ "seed": 0,
+ "config": {
+  "experiment": "h4_llm",
+  "space": "small",
+  "evaluator": "fast",
+  "sessions": "search",
+  "budget": 50,
+  "seeds": [
+   0
+  ],
+  "caps": {},
+  "verifier": true,
+  "sampling": "host",
+  "exclude": {},
+  "reference": {
+   "speedup": 9.4684
+  },
+  "plugins": [],
+  "compress": "auto",
+  "out": "/localhome/tsousape/domeline-agent-speedup/.worktrees/m5-llm/results/h",
+  "method": "harness.llm_agents:h_eat",
+  "kwargs": {
+   "backend": "sonnet"
+  },
+  "teams": [
+   {
+    "eval_n": 1,
+    "reason": "start of the run",
+    "why": "Baseline is 93846s (all on CPU presumably). Need to move compute to PIM first: mvm/lm_head placement is the dominant lever, then attention/softmax/vector placement, then hardware sizing and link.",
+    "team": [
+     {
+      "name": "placer",
+      "brief": "Move the weight MVMs and lm_head onto the PIM crossbars, since they dominate decode time, then tune cell_bits and xbar_scale for feasibility.",
+      "families": [
+       "cell_bits",
+       "lm_head",
+       "mvm",
+       "xbar_scale"
+      ]
+     },
+     {
+      "name": "attn",
+      "brief": "Move attention, softmax and KV handling into PIM (xbar or vfu) and size the supporting units and KV precision.",
+      "families": [
+       "attention",
+       "kv_bits",
+       "softmax",
+       "star_units",
+       "vfu_bw",
+       "vfu_mem",
+       "vfu_units",
+       "xbar_tech"
+      ]
+     },
+     {
+      "name": "rest",
+      "brief": "Offload vector ops and edge ops to PIM and upgrade the link to cut transfer overhead.",
+      "families": [
+       "edge",
+       "link",
+       "vector"
+      ]
+     },
+     {
+      "name": "area",
+      "brief": "Trim tile area with lean tiles and fewer ADCs once the design is feasible, trading area against time.",
+      "families": [
+       "adc_per_ima",
+       "xbar_tile"
+      ]
+     }
+    ]
+   },
+   {
+    "eval_n": 17,
+    "reason": "no accepted move in the last 6 proposals",
+    "why": "No worker has tried moving the weight MVMs (mvm) onto PIM, the biggest untested lever. Attention on xbar with transpose is also untested. Area and capacity knobs only matter once mvm moves, so they are merged into one worker.",
+    "team": [
+     {
+      "name": "placer",
+      "brief": "Move the 7 per-layer weight MVMs to xbar (keeping lm_head on xbar) on top of the best design, as this is the largest untried lever for decode time.",
+      "families": [
+       "lm_head",
+       "mvm"
+      ]
+     },
+     {
+      "name": "attn",
+      "brief": "Try attention on xbar with xbar_transpose, and tune kv_bits, vfu_units, vfu_bw, vfu_mem, softmax and star_units to cut attention time below the vfu design.",
+      "families": [
+       "attention",
+       "kv_bits",
+       "softmax",
+       "star_units",
+       "vfu_bw",
+       "vfu_mem",
+       "vfu_units",
+       "xbar_tech"
+      ]
+     },
+     {
+      "name": "rest",
+      "brief": "Keep the die link and vfu vector ops, and look for a legal way to offload the edge ops (embedding and sampling) without breaking the transfer and sampling rules.",
+      "families": [
+       "edge",
+       "link",
+       "vector"
+      ]
+     },
+     {
+      "name": "capacity",
+      "brief": "After mvm moves, fix any capacity infeasibility with cell_bits 4 and xbar_scale, then trim area with lean tiles and fewer ADCs only where time is unaffected.",
+      "families": [
+       "adc_per_ima",
+       "cell_bits",
+       "xbar_scale",
+       "xbar_tile"
+      ]
+     }
+    ]
+   },
+   {
+    "eval_n": 23,
+    "reason": "no accepted move in the last 6 proposals",
+    "why": "Best is #18 (1158 s). Attention-on-xbar was the big win. Remaining time is likely in softmax, vector ops, edge/link transfers and the MVMs. Area-trimming moves can't make it faster, so I'm merging the area workers into one that tests only whether more capacity or ADC speeds things up. The placer is ",
+    "team": [
+     {
+      "name": "attn",
+      "brief": "On top of #18, move softmax to star with star_units 2-8, and try kv_bits 4 and larger vfu_units to cut attention and softmax time.",
+      "families": [
+       "attention",
+       "kv_bits",
+       "softmax",
+       "star_units",
+       "vfu_bw",
+       "vfu_mem",
+       "vfu_units",
+       "xbar_tech"
+      ]
+     },
+     {
+      "name": "placer",
+      "brief": "On top of #18, check whether mvm placement variants (for example xbar versus other legal targets) and the lm_head placement lower time, and check which of the two dominates the remaining time.",
+      "families": [
+       "lm_head",
+       "mvm"
+      ]
+     },
+     {
+      "name": "rest",
+      "brief": "Test vector placement variants and the link level, and try legal edge placements, to cut transfer and elementwise overhead.",
+      "families": [
+       "edge",
+       "link",
+       "vector"
+      ]
+     },
+     {
+      "name": "capacity",
+      "brief": "Test whether speed-oriented settings (xbar_scale above 1, more ADCs per IMA, cell_bits 4) cut time on #18; skip pure area trims.",
+      "families": [
+       "adc_per_ima",
+       "cell_bits",
+       "xbar_scale",
+       "xbar_tile"
+      ]
+     }
+    ]
+   },
+   {
+    "eval_n": 34,
+    "reason": "no accepted move in the last 6 proposals",
+    "why": "Best is #30 at 399.5 s (9.47x GPU). The remaining time is likely dominated by something we haven't probed: star_units at 64 helped, so the nonlinear unit may still bind. Capacity and placement moves have saturated, so I'm dropping capacity and placer. I'm merging the attention, softmax and vector kn",
+    "team": [
+     {
+      "name": "nonlinear",
+      "brief": "Starting from #30, push star_units beyond 64 (128, 256) and try softmax/vector/attention combinations plus kv_bits 4 to cut the remaining softmax and elementwise time.",
+      "families": [
+       "attention",
+       "kv_bits",
+       "softmax",
+       "star_units",
+       "vector",
+       "xbar_tech"
+      ]
+     },
+     {
+      "name": "placement",
+      "brief": "Starting from #30, test the mvm placement variants other than cpu and the edge and link placements to find which transfer or weight-MVM component dominates the remaining time.",
+      "families": [
+       "edge",
+       "link",
+       "lm_head",
+       "mvm"
+      ]
+     },
+     {
+      "name": "vfu",
+      "brief": "Explore the vfu_units, vfu_bw and vfu_mem scaling in combination with the xbar attention to see if a hybrid offload lowers the attention time.",
+      "families": [
+       "vfu_bw",
+       "vfu_mem",
+       "vfu_units"
+      ]
+     },
+     {
+      "name": "capacity",
+      "brief": "Try xbar_tile lean and adc_per_ima increases (4, 8) only if they cut time on #30; otherwise leave the area knobs alone.",
+      "families": [
+       "adc_per_ima",
+       "cell_bits",
+       "xbar_scale",
+       "xbar_tile"
+      ]
+     }
+    ]
+   },
+   {
+    "eval_n": 39,
+    "reason": "no accepted move in the last 6 proposals",
+    "why": "Best is #30 at 399.5 s (9.47x). Most single-knob moves were tried and failed. The remaining time is probably the weight MVMs and the lm_head on xbar, which tools can't reduce below 227 s. Unexplored knobs are kv_bits 4, star_units 128 or more, lean tiles, ADC counts, and mvm variants other than cpu.",
+    "team": [
+     {
+      "name": "nonlinear",
+      "brief": "Starting from #30, try star_units 128/256 and kv_bits 4 (one change per proposal) to cut remaining softmax and elementwise time.",
+      "families": [
+       "attention",
+       "kv_bits",
+       "softmax",
+       "star_units",
+       "vector",
+       "xbar_tech"
+      ]
+     },
+     {
+      "name": "placement",
+      "brief": "Starting from #30, test the non-cpu mvm placement variants and the edge placement (avoid vfu) to find which component dominates remaining time.",
+      "families": [
+       "edge",
+       "link",
+       "lm_head",
+       "mvm"
+      ]
+     },
+     {
+      "name": "area",
+      "brief": "Try xbar_tile lean and adc_per_ima 4 on #30 to see whether time holds while area and effort fall; leave them alone if they slow it down.",
+      "families": [
+       "adc_per_ima",
+       "cell_bits",
+       "xbar_scale",
+       "xbar_tile"
+      ]
+     }
+    ]
+   },
+   {
+    "eval_n": 42,
+    "reason": "no accepted move in the last 8 proposals",
+    "why": "Best is 399.5 s on #30. Placement, link, tile and ADC variants have all been tried and none beat it. The untried knobs that could still cut time are star_units 128/256, kv_bits 4 and cell_bits 4. With 8 evaluations left, I'm using two focused workers and dropping the placement worker, whose families",
+    "team": [
+     {
+      "name": "nonlinear",
+      "brief": "From #30, change one knob per proposal: star_units 128 or 256, then kv_bits 4, to cut the remaining softmax, elementwise and KV time. Skip anything already tried.",
+      "families": [
+       "attention",
+       "kv_bits",
+       "softmax",
+       "star_units",
+       "vector",
+       "vfu_bw",
+       "vfu_mem",
+       "vfu_units",
+       "xbar_tech"
+      ]
+     },
+     {
+      "name": "capacity",
+      "brief": "From #30, try cell_bits 4 and xbar_scale variants, plus edge or link tweaks, to see whether time drops or holds while area and effort fall. Skip anything already tried.",
+      "families": [
+       "adc_per_ima",
+       "cell_bits",
+       "edge",
+       "link",
+       "xbar_scale",
+       "xbar_tile"
+      ]
+     }
+    ]
+   },
+   {
+    "eval_n": 45,
+    "reason": "no accepted move in the last 8 proposals",
+    "why": "Time is stuck at 399.5 s. Area and effort knobs (tile, ADC, cell_bits, scale) only trade area or slow the design down, so I'm dropping that worker. The remaining untried time levers are nonlinear throughput and the placement of the main compute.",
+    "team": [
+     {
+      "name": "nonlinear",
+      "brief": "From #30, change one knob per proposal: star_units 128 or 256, then kv_bits 4, to cut the remaining softmax, elementwise and KV time. Skip anything already tried.",
+      "families": [
+       "attention",
+       "kv_bits",
+       "softmax",
+       "star_units",
+       "vector",
+       "vfu_bw",
+       "vfu_mem",
+       "vfu_units",
+       "xbar_tech"
+      ]
+     },
+     {
+      "name": "placement",
+      "brief": "From #30, try untested placements and links that could cut the remaining time: edge, mvm and lm_head variants that are legal, and the link. Skip anything already tried.",
+      "families": [
+       "edge",
+       "link",
+       "lm_head",
+       "mvm"
+      ]
+     }
+    ]
+   },
+   {
+    "eval_n": 45,
+    "reason": "no accepted move in the last 6 proposals",
+    "why": "Best is 399.5s (9.47x) at #30. The 227 s tool floor leaves about 172 s of headroom. Placement and capacity knobs are largely exhausted. The remaining gains are in the nonlinear and KV paths. So I'm keeping a nonlinear worker with a narrower brief and merging in the unexplored vfu knobs. I'm adding a",
+    "team": [
+     {
+      "name": "nonlinear",
+      "brief": "From #30, try star_units 128 or 256 and then vfu_bw/vfu_mem variants, changing one knob at a time and skipping anything already tried, to cut the remaining softmax, elementwise and KV time.",
+      "families": [
+       "attention",
+       "kv_bits",
+       "softmax",
+       "star_units",
+       "vector",
+       "vfu_bw",
+       "vfu_mem",
+       "vfu_units",
+       "xbar_tech"
+      ]
+     },
+     {
+      "name": "placement",
+      "brief": "From #30, try link=die with the untested edge, mvm and lm_head combinations that are legal, and skip anything already tried or illegal.",
+      "families": [
+       "edge",
+       "link",
+       "lm_head",
+       "mvm"
+      ]
+     },
+     {
+      "name": "capacity",
+      "brief": "From #30, try xbar_scale values above 1.0, lean tile with cell_bits 4, and other area/effort cuts that keep the time near 399.5 s.",
+      "families": [
+       "adc_per_ima",
+       "cell_bits",
+       "xbar_scale",
+       "xbar_tile"
+      ]
+     }
+    ]
+   },
+   {
+    "eval_n": 48,
+    "reason": "no accepted move in the last 7 proposals",
+    "why": "Placement and capacity families are exhausted (all legal or useful moves tried, only slower or equal results). The remaining untested headroom is in the nonlinear and KV knobs, so I'm keeping one focused worker on them.",
+    "team": [
+     {
+      "name": "nonlinear",
+      "brief": "From #30, try untested star_units 128 then 256, then larger vfu_units or kv_bits 4 and attention=vfu variants, changing one knob at a time and skipping any duplicates.",
+      "families": [
+       "attention",
+       "kv_bits",
+       "softmax",
+       "star_units",
+       "vector",
+       "vfu_bw",
+       "vfu_mem",
+       "vfu_units",
+       "xbar_tech"
+      ]
+     }
+    ]
+   },
+   {
+    "eval_n": 49,
+    "reason": "no accepted move in the last 6 proposals",
+    "why": "Capacity and KV-precision knobs are exhausted and the vfu attention variants are far slower. The one untested lever near the best design is more nonlinear throughput, so star_units goes to 128. A second worker covers the placement of the remaining non-MVM work.",
+    "team": [
+     {
+      "name": "nonlinear",
+      "brief": "From #30, change only star_units to 128 (then 256 if it helps), since 16 was slower and 64 is the current best; skip any duplicates.",
+      "families": [
+       "softmax",
+       "star_units",
+       "vector",
+       "xbar_tech"
+      ]
+     },
+     {
+      "name": "placement",
+      "brief": "From #30, try legal placements of the remaining non-MVM work, such as edge on cpu or xbar and mvm variants, one knob at a time, avoiding the vfu edge placement that was illegal.",
+      "families": [
+       "edge",
+       "link",
+       "lm_head",
+       "mvm"
+      ]
+     }
+    ]
+   },
+   {
+    "eval_n": 50,
+    "reason": "no accepted move in the last 6 proposals",
+    "why": "No evaluations remain. The best design (#30) is at 399.5 s (9.47x GPU). Many variants tie it exactly (#42, #43, #47), and link, cell_bits and ADC changes are equal or slower. The remaining untried ideas are star_units 128 and edge placement, and neither can be evaluated now.",
+    "team": [
+     {
+      "name": "nonlinear",
+      "brief": "Try star_units 128 and then 256 from #30, skipping duplicates.",
+      "families": [
+       "softmax",
+       "star_units",
+       "vector",
+       "xbar_tech"
+      ]
+     },
+     {
+      "name": "placement",
+      "brief": "Try edge on cpu or xbar from #30, changing one knob at a time.",
+      "families": [
+       "edge",
+       "link",
+       "lm_head",
+       "mvm"
+      ]
+     }
+    ]
+   }
+  ],
+  "llm_calls": 58
+ },
+ "stop": "supervisor stopped",
+ "cost": {
+  "evaluations": 50,
+  "wall_s": 355.2403790950775,
+  "eval_wall_s": 1.0806872844696045,
+  "tokens": {
+   "claude-sonnet-5-5": {
+    "in": 301738,
+    "out": 24057
+   }
+  }
+ },
+ "evaluations": [
+  {
+   "point": {
+    "mvm": "xbar",
+    "lm_head": "cpu",
+    "attention": "cpu",
+    "xbar_tech": "xbar_isaac",
+    "softmax": "cpu",
+    "vector": "cpu",
+    "edge": "cpu",
+    "xbar_scale": 1.25,
+    "vfu_units": 1,
+    "vfu_bw": 64000000000.0,
+    "vfu_mem": 4000000000.0,
+    "star_units": 1,
+    "link": "cxl",
+    "kv_bits": 16,
+    "xbar_tile": "isaac",
+    "adc_per_ima": 8,
+    "cell_bits": 2
+   },
+   "n": 1,
+   "time_s": 93846.24230577795,
+   "llm_s": 93619.22607283639,
+   "tools_s": 227.0162329415616,
+   "speedup": 0.04030541329099843,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 4302.144,
+   "effort_months": 0.0,
+   "terms": {
+    "host": 93409.08292966837,
+    "launch": 83.69694449999986,
+    "transfer": 91.13315060925004,
+    "xbar_isaac": 35.31304805878122
+   }
+  },
+  {
+   "point": {
+    "mvm": "xbar",
+    "lm_head": "xbar",
+    "attention": "cpu",
+    "xbar_tech": "xbar_isaac",
+    "softmax": "cpu",
+    "vector": "cpu",
+    "edge": "cpu",
+    "xbar_scale": 1.25,
+    "vfu_units": 1,
+    "vfu_bw": 64000000000.0,
+    "vfu_mem": 4000000000.0,
+    "star_units": 1,
+    "link": "cxl",
+    "kv_bits": 16,
+    "xbar_tile": "isaac",
+    "adc_per_ima": 8,
+    "cell_bits": 2
+   },
+   "n": 2,
+   "time_s": 91819.47865475198,
+   "llm_s": 91592.46242181041,
+   "tools_s": 227.0162329415616,
+   "speedup": 0.04119508885651687,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 4762.7,
+   "effort_months": 0.0,
+   "terms": {
+    "host": 91379.81040460811,
+    "launch": 84.27817328124985,
+    "transfer": 92.82685127781254,
+    "xbar_isaac": 35.54699264323435
+   }
+  },
+  {
+   "point": {
+    "mvm": "xbar",
+    "lm_head": "xbar",
+    "attention": "vfu",
+    "xbar_tech": "xbar_isaac",
+    "softmax": "vfu",
+    "vector": "cpu",
+    "edge": "cpu",
+    "xbar_scale": 1.25,
+    "vfu_units": 64,
+    "vfu_bw": 1000000000000.0,
+    "vfu_mem": 64000000000.0,
+    "star_units": 1,
+    "link": "cxl",
+    "kv_bits": 8,
+    "xbar_tile": "isaac",
+    "adc_per_ima": 8,
+    "cell_bits": 2
+   },
+   "n": 3,
+   "time_s": 24469.637335573043,
+   "llm_s": 24242.62110263148,
+   "tools_s": 227.0162329415616,
+   "speedup": 0.1545797974064245,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 4762.956,
+   "effort_months": 4.0,
+   "terms": {
+    "host": 1202.6116869155028,
+    "launch": 84.27817328124985,
+    "transfer": 93.1175143331726,
+    "xbar_isaac": 35.54699264323435,
+    "write": 0.11044320138450006,
+    "vfu_puma": 22826.95629225694
+   }
+  },
+  {
+   "point": {
+    "mvm": "xbar",
+    "lm_head": "xbar",
+    "attention": "vfu",
+    "xbar_tech": "xbar_isaac",
+    "softmax": "vfu",
+    "vector": "cpu",
+    "edge": "cpu",
+    "xbar_scale": 1.25,
+    "vfu_units": 64,
+    "vfu_bw": 1000000000000.0,
+    "vfu_mem": 64000000000.0,
+    "star_units": 1,
+    "link": "package",
+    "kv_bits": 8,
+    "xbar_tile": "isaac",
+    "adc_per_ima": 8,
+    "cell_bits": 2
+   },
+   "n": 4,
+   "time_s": 24338.653968534218,
+   "llm_s": 24111.637735592656,
+   "tools_s": 227.0162329415616,
+   "speedup": 0.15541169971156632,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 4762.956,
+   "effort_months": 7.0,
+   "terms": {
+    "host": 1202.6116869155028,
+    "launch": 25.283451984374995,
+    "transfer": 21.128868591219348,
+    "xbar_isaac": 35.54699264323435,
+    "write": 0.11044320138450006,
+    "vfu_puma": 22826.95629225694
+   }
+  },
+  {
+   "point": {
+    "mvm": "xbar",
+    "lm_head": "xbar",
+    "attention": "vfu",
+    "xbar_tech": "xbar_isaac",
+    "softmax": "vfu",
+    "vector": "cpu",
+    "edge": "cpu",
+    "xbar_scale": 1.25,
+    "vfu_units": 64,
+    "vfu_bw": 1000000000000.0,
+    "vfu_mem": 64000000000.0,
+    "star_units": 1,
+    "link": "package",
+    "kv_bits": 8,
+    "xbar_tile": "lean",
+    "adc_per_ima": 8,
+    "cell_bits": 2
+   },
+   "n": 5,
+   "time_s": 24338.653968534218,
+   "llm_s": 24111.637735592656,
+   "tools_s": 227.0162329415616,
+   "speedup": 0.15541169971156632,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 2550.8987083333336,
+   "effort_months": 9.0,
+   "terms": {
+    "host": 1202.6116869155028,
+    "launch": 25.283451984374995,
+    "transfer": 21.128868591219348,
+    "xbar_isaac": 35.54699264323435,
+    "write": 0.11044320138450006,
+    "vfu_puma": 22826.95629225694
+   }
+  },
+  {
+   "point": {
+    "mvm": "xbar",
+    "lm_head": "xbar",
+    "attention": "vfu",
+    "xbar_tech": "xbar_isaac",
+    "softmax": "vfu",
+    "vector": "cpu",
+    "edge": "cpu",
+    "xbar_scale": 1.25,
+    "vfu_units": 64,
+    "vfu_bw": 1000000000000.0,
+    "vfu_mem": 64000000000.0,
+    "star_units": 1,
+    "link": "package",
+    "kv_bits": 8,
+    "xbar_tile": "lean",
+    "adc_per_ima": 4,
+    "cell_bits": 2
+   },
+   "n": 6,
+   "time_s": 24373.958388596715,
+   "llm_s": 24146.942155655153,
+   "tools_s": 227.0162329415616,
+   "speedup": 0.1551865938899444,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 1814.3987083333338,
+   "effort_months": 9.0,
+   "terms": {
+    "host": 1202.6116869155028,
+    "launch": 25.283451984374995,
+    "transfer": 21.128868591219348,
+    "xbar_isaac": 70.8514127057344,
+    "write": 0.11044320138450006,
+    "vfu_puma": 22826.95629225694
+   }
+  },
+  {
+   "point": {
+    "mvm": "xbar",
+    "lm_head": "xbar",
+    "attention": "vfu",
+    "xbar_tech": "xbar_isaac",
+    "softmax": "vfu",
+    "vector": "cpu",
+    "edge": "cpu",
+    "xbar_scale": 1.0,
+    "vfu_units": 64,
+    "vfu_bw": 1000000000000.0,
+    "vfu_mem": 64000000000.0,
+    "star_units": 1,
+    "link": "package",
+    "kv_bits": 8,
+    "xbar_tile": "isaac",
+    "adc_per_ima": 8,
+    "cell_bits": 2
+   },
+   "n": 7,
+   "time_s": 24338.653968534218,
+   "llm_s": 24111.637735592656,
+   "tools_s": 227.0162329415616,
+   "speedup": 0.15541169971156632,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 3810.416,
+   "effort_months": 7.0,
+   "terms": {
+    "host": 1202.6116869155028,
+    "launch": 25.283451984374995,
+    "transfer": 21.128868591219348,
+    "xbar_isaac": 35.54699264323435,
+    "write": 0.11044320138450006,
+    "vfu_puma": 22826.95629225694
+   }
+  },
+  {
+   "point": {
+    "mvm": "xbar",
+    "lm_head": "xbar",
+    "attention": "vfu",
+    "xbar_tech": "xbar_isaac",
+    "softmax": "vfu",
+    "vector": "cpu",
+    "edge": "cpu",
+    "xbar_scale": 1.0,
+    "vfu_units": 64,
+    "vfu_bw": 1000000000000.0,
+    "vfu_mem": 64000000000.0,
+    "star_units": 1,
+    "link": "package",
+    "kv_bits": 8,
+    "xbar_tile": "isaac",
+    "adc_per_ima": 8,
+    "cell_bits": 4
+   },
+   "n": 8,
+   "time_s": 24338.653968534218,
+   "llm_s": 24111.637735592656,
+   "tools_s": 227.0162329415616,
+   "speedup": 0.15541169971156632,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 2411.749670886076,
+   "effort_months": 10.0,
+   "terms": {
+    "host": 1202.6116869155028,
+    "launch": 25.283451984374995,
+    "transfer": 21.128868591219348,
+    "xbar_isaac": 35.54699264323435,
+    "write": 0.11044320138450006,
+    "vfu_puma": 22826.95629225694
+   }
+  },
+  {
+   "point": {
+    "mvm": "xbar",
+    "lm_head": "xbar",
+    "attention": "vfu",
+    "xbar_tech": "xbar_isaac",
+    "softmax": "star",
+    "vector": "cpu",
+    "edge": "cpu",
+    "xbar_scale": 1.25,
+    "vfu_units": 64,
+    "vfu_bw": 1000000000000.0,
+    "vfu_mem": 64000000000.0,
+    "star_units": 16,
+    "link": "package",
+    "kv_bits": 8,
+    "xbar_tile": "isaac",
+    "adc_per_ima": 8,
+    "cell_bits": 2
+   },
+   "n": 9,
+   "time_s": 24218.263094642916,
+   "llm_s": 23991.246861701355,
+   "tools_s": 227.0162329415616,
+   "speedup": 0.15618426338667754,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 4763.276,
+   "effort_months": 11.0,
+   "terms": {
+    "host": 1202.6116869155028,
+    "launch": 25.283451984374995,
+    "transfer": 66.3409431466112,
+    "xbar_isaac": 35.54699264323435,
+    "write": 0.11044320138450006,
+    "vfu_puma": 22606.141898876624,
+    "softmax_star": 55.211444933624946
+   }
+  },
+  {
+   "point": {
+    "mvm": "xbar",
+    "lm_head": "xbar",
+    "attention": "vfu",
+    "xbar_tech": "xbar_isaac",
+    "softmax": "vfu",
+    "vector": "cpu",
+    "edge": "cpu",
+    "xbar_scale": 1.25,
+    "vfu_units": 256,
+    "vfu_bw": 1000000000000.0,
+    "vfu_mem": 64000000000.0,
+    "star_units": 1,
+    "link": "package",
+    "kv_bits": 8,
+    "xbar_tile": "isaac",
+    "adc_per_ima": 8,
+    "cell_bits": 2
+   },
+   "n": 10,
+   "time_s": 7218.55444816971,
+   "llm_s": 6991.538215228148,
+   "tools_s": 227.0162329415616,
+   "speedup": 0.5239984832282634,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 4763.724,
+   "effort_months": 7.0,
+   "terms": {
+    "host": 1202.6116869155028,
+    "launch": 25.283451984374995,
+    "transfer": 21.128868591219348,
+    "xbar_isaac": 35.54699264323435,
+    "write": 0.11044320138450006,
+    "vfu_puma": 5706.856771892432
+   }
+  },
+  {
+   "point": {
+    "mvm": "xbar",
+    "lm_head": "xbar",
+    "attention": "vfu",
+    "xbar_tech": "xbar_isaac",
+    "softmax": "vfu",
+    "vector": "vfu",
+    "edge": "cpu",
+    "xbar_scale": 1.25,
+    "vfu_units": 256,
+    "vfu_bw": 1000000000000.0,
+    "vfu_mem": 64000000000.0,
+    "star_units": 1,
+    "link": "die",
+    "kv_bits": 8,
+    "xbar_tile": "isaac",
+    "adc_per_ima": 8,
+    "cell_bits": 2
+   },
+   "n": 11,
+   "time_s": 5979.511799702988,
+   "llm_s": 5752.495566761427,
+   "tools_s": 227.0162329415616,
+   "speedup": 0.6325786633834296,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 4763.724,
+   "effort_months": 13.0,
+   "terms": {
+    "host": 2.1203575386760414,
+    "launch": 0.0290614390625,
+    "transfer": 2.9132661456600113,
+    "vfu_puma": 5711.77544579341,
+    "xbar_isaac": 35.54699264323435,
+    "write": 0.11044320138450006
+   }
+  },
+  {
+   "point": {
+    "mvm": "xbar",
+    "lm_head": "xbar",
+    "attention": "vfu",
+    "xbar_tech": "xbar_isaac",
+    "softmax": "vfu",
+    "vector": "vfu",
+    "edge": "cpu",
+    "xbar_scale": 1.25,
+    "vfu_units": 256,
+    "vfu_bw": 1000000000000.0,
+    "vfu_mem": 64000000000.0,
+    "star_units": 1,
+    "link": "die",
+    "kv_bits": 8,
+    "xbar_tile": "lean",
+    "adc_per_ima": 8,
+    "cell_bits": 2
+   },
+   "n": 12,
+   "time_s": 5979.511799702988,
+   "llm_s": 5752.495566761427,
+   "tools_s": 227.0162329415616,
+   "speedup": 0.6325786633834296,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 2551.6667083333336,
+   "effort_months": 15.0,
+   "terms": {
+    "host": 2.1203575386760414,
+    "launch": 0.0290614390625,
+    "transfer": 2.9132661456600113,
+    "vfu_puma": 5711.77544579341,
+    "xbar_isaac": 35.54699264323435,
+    "write": 0.11044320138450006
+   }
+  },
+  {
+   "point": {
+    "mvm": "xbar",
+    "lm_head": "xbar",
+    "attention": "vfu",
+    "xbar_tech": "xbar_isaac",
+    "softmax": "vfu",
+    "vector": "vfu",
+    "edge": "cpu",
+    "xbar_scale": 1.25,
+    "vfu_units": 256,
+    "vfu_bw": 1000000000000.0,
+    "vfu_mem": 64000000000.0,
+    "star_units": 1,
+    "link": "die",
+    "kv_bits": 8,
+    "xbar_tile": "isaac",
+    "adc_per_ima": 4,
+    "cell_bits": 2
+   },
+   "n": 13,
+   "time_s": 6014.816219765489,
+   "llm_s": 5787.799986823928,
+   "tools_s": 227.0162329415616,
+   "speedup": 0.6288656949337411,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 4027.224,
+   "effort_months": 13.0,
+   "terms": {
+    "host": 2.1203575386760414,
+    "launch": 0.0290614390625,
+    "transfer": 2.9132661456600113,
+    "vfu_puma": 5711.77544579341,
+    "xbar_isaac": 70.8514127057344,
+    "write": 0.11044320138450006
+   }
+  },
+  {
+   "point": {
+    "mvm": "xbar",
+    "lm_head": "xbar",
+    "attention": "vfu",
+    "xbar_tech": "xbar_isaac",
+    "softmax": "vfu",
+    "vector": "vfu",
+    "edge": "cpu",
+    "xbar_scale": 1.25,
+    "vfu_units": 256,
+    "vfu_bw": 1000000000000.0,
+    "vfu_mem": 64000000000.0,
+    "star_units": 1,
+    "link": "die",
+    "kv_bits": 8,
+    "xbar_tile": "lean",
+    "adc_per_ima": 4,
+    "cell_bits": 2
+   },
+   "n": 14,
+   "time_s": 6014.816219765489,
+   "llm_s": 5787.799986823928,
+   "tools_s": 227.0162329415616,
+   "speedup": 0.6288656949337411,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 1815.1667083333336,
+   "effort_months": 15.0,
+   "terms": {
+    "host": 2.1203575386760414,
+    "launch": 0.0290614390625,
+    "transfer": 2.9132661456600113,
+    "vfu_puma": 5711.77544579341,
+    "xbar_isaac": 70.8514127057344,
+    "write": 0.11044320138450006
+   }
+  },
+  {
+   "point": {
+    "mvm": "xbar",
+    "lm_head": "xbar",
+    "attention": "vfu",
+    "xbar_tech": "xbar_isaac",
+    "softmax": "vfu",
+    "vector": "vfu",
+    "edge": "cpu",
+    "xbar_scale": 2.0,
+    "vfu_units": 256,
+    "vfu_bw": 1000000000000.0,
+    "vfu_mem": 64000000000.0,
+    "star_units": 1,
+    "link": "die",
+    "kv_bits": 8,
+    "xbar_tile": "isaac",
+    "adc_per_ima": 8,
+    "cell_bits": 2
+   },
+   "n": 15,
+   "time_s": 5979.511799702988,
+   "llm_s": 5752.495566761427,
+   "tools_s": 227.0162329415616,
+   "speedup": 0.6325786633834296,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 7621.344000000001,
+   "effort_months": 13.0,
+   "terms": {
+    "host": 2.1203575386760414,
+    "launch": 0.0290614390625,
+    "transfer": 2.9132661456600113,
+    "vfu_puma": 5711.77544579341,
+    "xbar_isaac": 35.54699264323435,
+    "write": 0.11044320138450006
+   }
+  },
+  {
+   "point": {
+    "mvm": "xbar",
+    "lm_head": "xbar",
+    "attention": "vfu",
+    "xbar_tech": "xbar_isaac",
+    "softmax": "vfu",
+    "vector": "vfu",
+    "edge": "cpu",
+    "xbar_scale": 1.25,
+    "vfu_units": 256,
+    "vfu_bw": 1000000000000.0,
+    "vfu_mem": 64000000000.0,
+    "star_units": 1,
+    "link": "die",
+    "kv_bits": 8,
+    "xbar_tile": "isaac",
+    "adc_per_ima": 8,
+    "cell_bits": 4
+   },
+   "n": 16,
+   "time_s": 5979.511799702988,
+   "llm_s": 5752.495566761427,
+   "tools_s": 227.0162329415616,
+   "speedup": 0.6325786633834296,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 3015.3910886075946,
+   "effort_months": 16.0,
+   "terms": {
+    "host": 2.1203575386760414,
+    "launch": 0.0290614390625,
+    "transfer": 2.9132661456600113,
+    "vfu_puma": 5711.77544579341,
+    "xbar_isaac": 35.54699264323435,
+    "write": 0.11044320138450006
+   }
+  },
+  {
+   "point": {
+    "mvm": "xbar",
+    "lm_head": "xbar",
+    "attention": "vfu",
+    "xbar_tech": "xbar_isaac",
+    "softmax": "vfu",
+    "vector": "vfu",
+    "edge": "cpu",
+    "xbar_scale": 1.0,
+    "vfu_units": 256,
+    "vfu_bw": 1000000000000.0,
+    "vfu_mem": 64000000000.0,
+    "star_units": 1,
+    "link": "die",
+    "kv_bits": 8,
+    "xbar_tile": "isaac",
+    "adc_per_ima": 8,
+    "cell_bits": 4
+   },
+   "n": 17,
+   "time_s": 5979.511799702988,
+   "llm_s": 5752.495566761427,
+   "tools_s": 227.0162329415616,
+   "speedup": 0.6325786633834296,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 2412.517670886076,
+   "effort_months": 16.0,
+   "terms": {
+    "host": 2.1203575386760414,
+    "launch": 0.0290614390625,
+    "transfer": 2.9132661456600113,
+    "vfu_puma": 5711.77544579341,
+    "xbar_isaac": 35.54699264323435,
+    "write": 0.11044320138450006
+   }
+  },
+  {
+   "point": {
+    "mvm": "xbar",
+    "lm_head": "xbar",
+    "attention": "xbar",
+    "xbar_tech": "xbar_transpose",
+    "softmax": "vfu",
+    "vector": "vfu",
+    "edge": "cpu",
+    "xbar_scale": 1.25,
+    "vfu_units": 256,
+    "vfu_bw": 64000000000.0,
+    "vfu_mem": 4000000000.0,
+    "star_units": 1,
+    "link": "die",
+    "kv_bits": 8,
+    "xbar_tile": "isaac",
+    "adc_per_ima": 8,
+    "cell_bits": 2
+   },
+   "n": 18,
+   "time_s": 1158.1533757761802,
+   "llm_s": 931.1371428346185,
+   "tools_s": 227.0162329415616,
+   "speedup": 3.2659850250029008,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 12160.293999999998,
+   "effort_months": 13.0,
+   "terms": {
+    "host": 2.1203575386760414,
+    "launch": 0.0290614390625,
+    "transfer": 48.12534070105213,
+    "vfu_puma": 773.7464290904524,
+    "xbar_transpose": 106.00066673748555,
+    "write": 1.1152873278899993
+   }
+  },
+  {
+   "point": {
+    "mvm": "xbar",
+    "lm_head": "xbar",
+    "attention": "xbar",
+    "xbar_tech": "xbar_transpose",
+    "softmax": "vfu",
+    "vector": "vfu",
+    "edge": "cpu",
+    "xbar_scale": 1.25,
+    "vfu_units": 256,
+    "vfu_bw": 64000000000.0,
+    "vfu_mem": 4000000000.0,
+    "star_units": 1,
+    "link": "die",
+    "kv_bits": 8,
+    "xbar_tile": "isaac",
+    "adc_per_ima": 8,
+    "cell_bits": 4
+   },
+   "n": 19,
+   "time_s": 1178.9580437920401,
+   "llm_s": 951.9418108504785,
+   "tools_s": 227.0162329415616,
+   "speedup": 3.208351308054496,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 7696.764506329113,
+   "effort_months": 16.0,
+   "terms": {
+    "host": 2.1203575386760414,
+    "launch": 0.0290614390625,
+    "transfer": 48.12534070105213,
+    "vfu_puma": 773.7464290904524,
+    "xbar_transpose": 106.00066673748555,
+    "write": 21.919955343749987
+   }
+  },
+  {
+   "point": {
+    "mvm": "xbar",
+    "lm_head": "xbar",
+    "attention": "xbar",
+    "xbar_tech": "xbar_transpose",
+    "softmax": "vfu",
+    "vector": "vfu",
+    "edge": "cpu",
+    "xbar_scale": 1.0,
+    "vfu_units": 256,
+    "vfu_bw": 64000000000.0,
+    "vfu_mem": 4000000000.0,
+    "star_units": 1,
+    "link": "die",
+    "kv_bits": 8,
+    "xbar_tile": "isaac",
+    "adc_per_ima": 8,
+    "cell_bits": 4
+   },
+   "n": 20,
+   "time_s": 1179.1508179368489,
+   "llm_s": 952.1345849952874,
+   "tools_s": 227.0162329415616,
+   "speedup": 3.207826788908813,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 6157.616405063291,
+   "effort_months": 16.0,
+   "terms": {
+    "host": 2.1203575386760414,
+    "launch": 0.0290614390625,
+    "transfer": 48.12534070105213,
+    "vfu_puma": 773.7464290904524,
+    "xbar_transpose": 106.00066673748555,
+    "write": 22.11272948855873
+   }
+  },
+  {
+   "point": {
+    "mvm": "xbar",
+    "lm_head": "xbar",
+    "attention": "xbar",
+    "xbar_tech": "xbar_transpose",
+    "softmax": "vfu",
+    "vector": "vfu",
+    "edge": "cpu",
+    "xbar_scale": 1.25,
+    "vfu_units": 256,
+    "vfu_bw": 64000000000.0,
+    "vfu_mem": 4000000000.0,
+    "star_units": 1,
+    "link": "die",
+    "kv_bits": 8,
+    "xbar_tile": "lean",
+    "adc_per_ima": 8,
+    "cell_bits": 4
+   },
+   "n": 21,
+   "time_s": 1178.9580437920401,
+   "llm_s": 951.9418108504785,
+   "tools_s": 227.0162329415616,
+   "speedup": 3.208351308054496,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 4614.9054609704635,
+   "effort_months": 18.0,
+   "terms": {
+    "host": 2.1203575386760414,
+    "launch": 0.0290614390625,
+    "transfer": 48.12534070105213,
+    "vfu_puma": 773.7464290904524,
+    "xbar_transpose": 106.00066673748555,
+    "write": 21.919955343749987
+   }
+  },
+  {
+   "point": {
+    "mvm": "xbar",
+    "lm_head": "cpu",
+    "attention": "xbar",
+    "xbar_tech": "xbar_transpose",
+    "softmax": "vfu",
+    "vector": "vfu",
+    "edge": "cpu",
+    "xbar_scale": 1.25,
+    "vfu_units": 256,
+    "vfu_bw": 64000000000.0,
+    "vfu_mem": 4000000000.0,
+    "star_units": 1,
+    "link": "die",
+    "kv_bits": 8,
+    "xbar_tile": "isaac",
+    "adc_per_ima": 8,
+    "cell_bits": 2
+   },
+   "n": 22,
+   "time_s": 3187.1036466758683,
+   "llm_s": 2960.0874137343067,
+   "tools_s": 227.0162329415616,
+   "speedup": 1.1868178764398518,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 11626.143999999998,
+   "effort_months": 13.0,
+   "terms": {
+    "host": 2031.3928825989253,
+    "launch": 0.0290614390625,
+    "transfer": 48.03703112494413,
+    "vfu_puma": 773.7464290904524,
+    "xbar_transpose": 105.76672215303242,
+    "write": 1.1152873278899993
+   }
+  },
+  {
+   "point": {
+    "mvm": "cpu",
+    "lm_head": "xbar",
+    "attention": "xbar",
+    "xbar_tech": "xbar_transpose",
+    "softmax": "vfu",
+    "vector": "vfu",
+    "edge": "cpu",
+    "xbar_scale": 1.25,
+    "vfu_units": 256,
+    "vfu_bw": 64000000000.0,
+    "vfu_mem": 4000000000.0,
+    "star_units": 1,
+    "link": "die",
+    "kv_bits": 8,
+    "xbar_tile": "isaac",
+    "adc_per_ima": 8,
+    "cell_bits": 2
+   },
+   "n": 23,
+   "time_s": 45869.22227567966,
+   "llm_s": 45642.2060427381,
+   "tools_s": 227.0162329415616,
+   "speedup": 0.08246295433587696,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 7170.6939999999995,
+   "effort_months": 13.0,
+   "terms": {
+    "host": 44744.026795220576,
+    "launch": 4.213908664062487,
+    "transfer": 48.41600375641214,
+    "vfu_puma": 773.7464290904524,
+    "write": 1.1152873278899993,
+    "xbar_transpose": 70.68761867870415
+   }
+  },
+  {
+   "point": {
+    "mvm": "xbar",
+    "lm_head": "xbar",
+    "attention": "xbar",
+    "xbar_tech": "xbar_transpose",
+    "softmax": "star",
+    "vector": "vfu",
+    "edge": "cpu",
+    "xbar_scale": 1.25,
+    "vfu_units": 256,
+    "vfu_bw": 64000000000.0,
+    "vfu_mem": 4000000000.0,
+    "star_units": 16,
+    "link": "die",
+    "kv_bits": 8,
+    "xbar_tile": "isaac",
+    "adc_per_ima": 8,
+    "cell_bits": 2
+   },
+   "n": 24,
+   "time_s": 506.87384519149344,
+   "llm_s": 279.85761224993183,
+   "tools_s": 227.0162329415616,
+   "speedup": 7.462431959795746,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 12160.613999999998,
+   "effort_months": 17.0,
+   "terms": {
+    "host": 2.1203575386760414,
+    "launch": 0.0290614390625,
+    "transfer": 48.12534070105213,
+    "vfu_puma": 67.25545357214068,
+    "xbar_transpose": 106.00066673748555,
+    "write": 1.1152873278899993,
+    "softmax_star": 55.211444933624946
+   }
+  },
+  {
+   "point": {
+    "mvm": "xbar",
+    "lm_head": "cpu",
+    "attention": "xbar",
+    "xbar_tech": "xbar_transpose",
+    "softmax": "star",
+    "vector": "vfu",
+    "edge": "cpu",
+    "xbar_scale": 1.25,
+    "vfu_units": 256,
+    "vfu_bw": 64000000000.0,
+    "vfu_mem": 4000000000.0,
+    "star_units": 16,
+    "link": "die",
+    "kv_bits": 8,
+    "xbar_tile": "isaac",
+    "adc_per_ima": 8,
+    "cell_bits": 2
+   },
+   "n": 25,
+   "time_s": 2535.8241160911816,
+   "llm_s": 2308.80788314962,
+   "tools_s": 227.0162329415616,
+   "speedup": 1.491630100817904,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 11626.463999999998,
+   "effort_months": 17.0,
+   "terms": {
+    "host": 2031.3928825989253,
+    "launch": 0.0290614390625,
+    "transfer": 48.03703112494413,
+    "vfu_puma": 67.25545357214068,
+    "xbar_transpose": 105.76672215303242,
+    "write": 1.1152873278899993,
+    "softmax_star": 55.211444933624946
+   }
+  },
+  {
+   "point": {
+    "mvm": "cpu",
+    "lm_head": "xbar",
+    "attention": "xbar",
+    "xbar_tech": "xbar_transpose",
+    "softmax": "star",
+    "vector": "vfu",
+    "edge": "cpu",
+    "xbar_scale": 1.25,
+    "vfu_units": 256,
+    "vfu_bw": 64000000000.0,
+    "vfu_mem": 4000000000.0,
+    "star_units": 16,
+    "link": "die",
+    "kv_bits": 8,
+    "xbar_tile": "isaac",
+    "adc_per_ima": 8,
+    "cell_bits": 2
+   },
+   "n": 26,
+   "time_s": 45217.94274509497,
+   "llm_s": 44990.92651215341,
+   "tools_s": 227.0162329415616,
+   "speedup": 0.0836506782996418,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 7171.013999999999,
+   "effort_months": 17.0,
+   "terms": {
+    "host": 44744.026795220576,
+    "launch": 4.213908664062487,
+    "transfer": 48.41600375641214,
+    "vfu_puma": 67.25545357214068,
+    "write": 1.1152873278899993,
+    "xbar_transpose": 70.68761867870415,
+    "softmax_star": 55.211444933624946
+   }
+  },
+  {
+   "point": {
+    "mvm": "xbar",
+    "lm_head": "xbar",
+    "attention": "xbar",
+    "xbar_tech": "xbar_transpose",
+    "softmax": "star",
+    "vector": "star",
+    "edge": "cpu",
+    "xbar_scale": 1.25,
+    "vfu_units": 1,
+    "vfu_bw": 64000000000.0,
+    "vfu_mem": 4000000000.0,
+    "star_units": 16,
+    "link": "die",
+    "kv_bits": 8,
+    "xbar_tile": "isaac",
+    "adc_per_ima": 8,
+    "cell_bits": 2
+   },
+   "n": 27,
+   "time_s": 444.2297822890091,
+   "llm_s": 217.2135493474475,
+   "tools_s": 227.0162329415616,
+   "speedup": 8.514763603761978,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 12159.589999999998,
+   "effort_months": 16.0,
+   "terms": {
+    "host": 2.1203575386760414,
+    "launch": 0.0290614390625,
+    "transfer": 48.12534070105213,
+    "softmax_star": 59.82283560328127,
+    "xbar_transpose": 106.00066673748555,
+    "write": 1.1152873278899993
+   }
+  },
+  {
+   "point": {
+    "mvm": "xbar",
+    "lm_head": "xbar",
+    "attention": "xbar",
+    "xbar_tech": "xbar_transpose",
+    "softmax": "star",
+    "vector": "star",
+    "edge": "cpu",
+    "xbar_scale": 2.0,
+    "vfu_units": 1,
+    "vfu_bw": 64000000000.0,
+    "vfu_mem": 4000000000.0,
+    "star_units": 16,
+    "link": "die",
+    "kv_bits": 8,
+    "xbar_tile": "isaac",
+    "adc_per_ima": 8,
+    "cell_bits": 2
+   },
+   "n": 28,
+   "time_s": 444.2297822890091,
+   "llm_s": 217.2135493474475,
+   "tools_s": 227.0162329415616,
+   "speedup": 8.514763603761978,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 19455.152,
+   "effort_months": 16.0,
+   "terms": {
+    "host": 2.1203575386760414,
+    "launch": 0.0290614390625,
+    "transfer": 48.12534070105213,
+    "softmax_star": 59.82283560328127,
+    "xbar_transpose": 106.00066673748555,
+    "write": 1.1152873278899993
+   }
+  },
+  {
+   "point": {
+    "mvm": "xbar",
+    "lm_head": "xbar",
+    "attention": "xbar",
+    "xbar_tech": "xbar_transpose",
+    "softmax": "star",
+    "vector": "star",
+    "edge": "cpu",
+    "xbar_scale": 1.5,
+    "vfu_units": 1,
+    "vfu_bw": 64000000000.0,
+    "vfu_mem": 4000000000.0,
+    "star_units": 16,
+    "link": "die",
+    "kv_bits": 8,
+    "xbar_tile": "isaac",
+    "adc_per_ima": 8,
+    "cell_bits": 2
+   },
+   "n": 29,
+   "time_s": 444.2297822890091,
+   "llm_s": 217.2135493474475,
+   "tools_s": 227.0162329415616,
+   "speedup": 8.514763603761978,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 14591.444,
+   "effort_months": 16.0,
+   "terms": {
+    "host": 2.1203575386760414,
+    "launch": 0.0290614390625,
+    "transfer": 48.12534070105213,
+    "softmax_star": 59.82283560328127,
+    "xbar_transpose": 106.00066673748555,
+    "write": 1.1152873278899993
+   }
+  },
+  {
+   "point": {
+    "mvm": "xbar",
+    "lm_head": "xbar",
+    "attention": "xbar",
+    "xbar_tech": "xbar_transpose",
+    "softmax": "star",
+    "vector": "star",
+    "edge": "cpu",
+    "xbar_scale": 1.25,
+    "vfu_units": 1,
+    "vfu_bw": 64000000000.0,
+    "vfu_mem": 4000000000.0,
+    "star_units": 64,
+    "link": "die",
+    "kv_bits": 8,
+    "xbar_tile": "isaac",
+    "adc_per_ima": 8,
+    "cell_bits": 2
+   },
+   "n": 30,
+   "time_s": 399.4886369248841,
+   "llm_s": 172.47240398332247,
+   "tools_s": 227.0162329415616,
+   "speedup": 9.468383408994905,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 12160.55,
+   "effort_months": 16.0,
+   "terms": {
+    "host": 2.1203575386760414,
+    "launch": 0.0290614390625,
+    "transfer": 48.12534070105213,
+    "softmax_star": 15.081690239156238,
+    "xbar_transpose": 106.00066673748555,
+    "write": 1.1152873278899993
+   }
+  },
+  {
+   "point": {
+    "mvm": "xbar",
+    "lm_head": "cpu",
+    "attention": "xbar",
+    "xbar_tech": "xbar_transpose",
+    "softmax": "star",
+    "vector": "star",
+    "edge": "cpu",
+    "xbar_scale": 1.25,
+    "vfu_units": 1,
+    "vfu_bw": 64000000000.0,
+    "vfu_mem": 4000000000.0,
+    "star_units": 64,
+    "link": "die",
+    "kv_bits": 8,
+    "xbar_tile": "isaac",
+    "adc_per_ima": 8,
+    "cell_bits": 2
+   },
+   "n": 31,
+   "time_s": 2428.438907824572,
+   "llm_s": 2201.4226748830106,
+   "tools_s": 227.0162329415616,
+   "speedup": 1.557589762605964,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 11626.4,
+   "effort_months": 16.0,
+   "terms": {
+    "host": 2031.3928825989253,
+    "launch": 0.0290614390625,
+    "transfer": 48.03703112494413,
+    "softmax_star": 15.081690239156238,
+    "xbar_transpose": 105.76672215303242,
+    "write": 1.1152873278899993
+   }
+  },
+  {
+   "point": {
+    "mvm": "xbar",
+    "lm_head": "xbar",
+    "attention": "xbar",
+    "xbar_tech": "xbar_transpose",
+    "softmax": "star",
+    "vector": "star",
+    "edge": "cpu",
+    "xbar_scale": 1.25,
+    "vfu_units": 1,
+    "vfu_bw": 64000000000.0,
+    "vfu_mem": 4000000000.0,
+    "star_units": 64,
+    "link": "die",
+    "kv_bits": 8,
+    "xbar_tile": "isaac",
+    "adc_per_ima": 8,
+    "cell_bits": 4
+   },
+   "n": 32,
+   "time_s": 420.29330494074406,
+   "llm_s": 193.27707199918245,
+   "tools_s": 227.0162329415616,
+   "speedup": 8.999695064081136,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 7697.020506329112,
+   "effort_months": 19.0,
+   "terms": {
+    "host": 2.1203575386760414,
+    "launch": 0.0290614390625,
+    "transfer": 48.12534070105213,
+    "softmax_star": 15.081690239156238,
+    "xbar_transpose": 106.00066673748555,
+    "write": 21.919955343749987
+   }
+  },
+  {
+   "point": {
+    "mvm": "xbar",
+    "lm_head": "xbar",
+    "attention": "xbar",
+    "xbar_tech": "xbar_transpose",
+    "softmax": "star",
+    "vector": "star",
+    "edge": "cpu",
+    "xbar_scale": 1.0,
+    "vfu_units": 1,
+    "vfu_bw": 64000000000.0,
+    "vfu_mem": 4000000000.0,
+    "star_units": 64,
+    "link": "die",
+    "kv_bits": 8,
+    "xbar_tile": "isaac",
+    "adc_per_ima": 8,
+    "cell_bits": 2
+   },
+   "n": 33,
+   "time_s": 399.5058015347378,
+   "llm_s": 172.48956859317622,
+   "tools_s": 227.0162329415616,
+   "speedup": 9.467976603620523,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 9728.696,
+   "effort_months": 16.0,
+   "terms": {
+    "host": 2.1203575386760414,
+    "launch": 0.0290614390625,
+    "transfer": 48.12534070105213,
+    "softmax_star": 15.081690239156238,
+    "xbar_transpose": 106.00066673748555,
+    "write": 1.1324519377437698
+   }
+  },
+  {
+   "point": {
+    "mvm": "xbar",
+    "lm_head": "xbar",
+    "attention": "vfu",
+    "xbar_tech": "xbar_transpose",
+    "softmax": "star",
+    "vector": "star",
+    "edge": "cpu",
+    "xbar_scale": 1.25,
+    "vfu_units": 256,
+    "vfu_bw": 1000000000000.0,
+    "vfu_mem": 16000000000.0,
+    "star_units": 64,
+    "link": "die",
+    "kv_bits": 8,
+    "xbar_tile": "isaac",
+    "adc_per_ima": 8,
+    "cell_bits": 2
+   },
+   "n": 34,
+   "time_s": 5979.934722364109,
+   "llm_s": 5752.918489422547,
+   "tools_s": 227.0162329415616,
+   "speedup": 0.6325339251272266,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 5526.054,
+   "effort_months": 20.0,
+   "terms": {
+    "host": 2.1203575386760414,
+    "launch": 0.0290614390625,
+    "transfer": 48.4160037564121,
+    "softmax_star": 15.081690239156238,
+    "xbar_transpose": 35.54699264323435,
+    "write": 0.11044320138450006,
+    "vfu_puma": 5651.613940604621
+   }
+  },
+  {
+   "point": {
+    "mvm": "xbar",
+    "lm_head": "xbar",
+    "attention": "xbar",
+    "xbar_tech": "xbar_transpose",
+    "softmax": "vfu",
+    "vector": "star",
+    "edge": "cpu",
+    "xbar_scale": 1.25,
+    "vfu_units": 1,
+    "vfu_bw": 64000000000.0,
+    "vfu_mem": 4000000000.0,
+    "star_units": 64,
+    "link": "die",
+    "kv_bits": 8,
+    "xbar_tile": "isaac",
+    "adc_per_ima": 8,
+    "cell_bits": 2
+   },
+   "n": 35,
+   "time_s": 14514.495691664706,
+   "llm_s": 14287.479458723144,
+   "tools_s": 227.0162329415616,
+   "speedup": 0.2606023428091793,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 12160.553999999998,
+   "effort_months": 17.0,
+   "terms": {
+    "host": 2.1203575386760414,
+    "launch": 0.0290614390625,
+    "transfer": 48.12534070105213,
+    "softmax_star": 1.263135828656252,
+    "xbar_transpose": 106.00066673748555,
+    "write": 1.1152873278899993,
+    "vfu_puma": 14128.825609150323
+   }
+  },
+  {
+   "point": {
+    "mvm": "xbar",
+    "lm_head": "xbar",
+    "attention": "xbar",
+    "xbar_tech": "xbar_transpose",
+    "softmax": "star",
+    "vector": "vfu",
+    "edge": "cpu",
+    "xbar_scale": 1.25,
+    "vfu_units": 1,
+    "vfu_bw": 64000000000.0,
+    "vfu_mem": 4000000000.0,
+    "star_units": 64,
+    "link": "die",
+    "kv_bits": 8,
+    "xbar_tile": "isaac",
+    "adc_per_ima": 8,
+    "cell_bits": 2
+   },
+   "n": 36,
+   "time_s": 1217.5968415803704,
+   "llm_s": 990.5806086388087,
+   "tools_s": 227.0162329415616,
+   "speedup": 3.1065385953466174,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 12160.553999999998,
+   "effort_months": 17.0,
+   "terms": {
+    "host": 2.1203575386760414,
+    "launch": 0.0290614390625,
+    "transfer": 48.12534070105213,
+    "vfu_puma": 819.3713404841425,
+    "xbar_transpose": 106.00066673748555,
+    "write": 1.1152873278899993,
+    "softmax_star": 13.818554410499992
+   }
+  },
+  {
+   "point": {
+    "mvm": "xbar",
+    "lm_head": "xbar",
+    "attention": "xbar",
+    "xbar_tech": "xbar_isaac",
+    "softmax": "star",
+    "vector": "star",
+    "edge": "cpu",
+    "xbar_scale": 1.25,
+    "vfu_units": 1,
+    "vfu_bw": 64000000000.0,
+    "vfu_mem": 4000000000.0,
+    "star_units": 64,
+    "link": "die",
+    "kv_bits": 8,
+    "xbar_tile": "isaac",
+    "adc_per_ima": 8,
+    "cell_bits": 2
+   },
+   "n": 37,
+   "time_s": 470.3093822458991,
+   "llm_s": 243.29314930433745,
+   "tools_s": 227.0162329415616,
+   "speedup": 8.042602858311453,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 10485.2728,
+   "effort_months": 13.0,
+   "terms": {
+    "host": 2.1203575386760414,
+    "launch": 0.0290614390625,
+    "transfer": 48.12534070105213,
+    "softmax_star": 15.081690239156238,
+    "xbar_isaac": 106.00066673748555,
+    "write": 71.936032648905
+   }
+  },
+  {
+   "point": {
+    "mvm": "cpu",
+    "lm_head": "xbar",
+    "attention": "xbar",
+    "xbar_tech": "xbar_transpose",
+    "softmax": "star",
+    "vector": "star",
+    "edge": "cpu",
+    "xbar_scale": 1.25,
+    "vfu_units": 1,
+    "vfu_bw": 64000000000.0,
+    "vfu_mem": 4000000000.0,
+    "star_units": 64,
+    "link": "die",
+    "kv_bits": 8,
+    "xbar_tile": "isaac",
+    "adc_per_ima": 8,
+    "cell_bits": 2
+   },
+   "n": 38,
+   "time_s": 45110.55753682836,
+   "llm_s": 44883.5413038868,
+   "tools_s": 227.0162329415616,
+   "speedup": 0.08384980786046617,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 7170.949999999999,
+   "effort_months": 16.0,
+   "terms": {
+    "host": 44744.026795220576,
+    "launch": 4.213908664062487,
+    "transfer": 48.41600375641214,
+    "softmax_star": 15.081690239156238,
+    "write": 1.1152873278899993,
+    "xbar_transpose": 70.68761867870415
+   }
+  },
+  {
+   "point": {
+    "mvm": "xbar",
+    "lm_head": "xbar",
+    "attention": "xbar",
+    "xbar_tech": "xbar_transpose",
+    "softmax": "star",
+    "vector": "star",
+    "edge": "cpu",
+    "xbar_scale": 1.25,
+    "vfu_units": 1,
+    "vfu_bw": 64000000000.0,
+    "vfu_mem": 4000000000.0,
+    "star_units": 64,
+    "link": "package",
+    "kv_bits": 8,
+    "xbar_tile": "isaac",
+    "adc_per_ima": 8,
+    "cell_bits": 2
+   },
+   "n": 39,
+   "time_s": 399.96044919700546,
+   "llm_s": 172.94421625544382,
+   "tools_s": 227.0162329415616,
+   "speedup": 9.457214055878907,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 12160.55,
+   "effort_months": 10.0,
+   "terms": {
+    "host": 2.1203575386760414,
+    "launch": 0.174368634375,
+    "transfer": 48.451845777861,
+    "softmax_star": 15.081690239156238,
+    "xbar_transpose": 106.00066673748555,
+    "write": 1.1152873278899993
+   }
+  },
+  {
+   "point": {
+    "mvm": "cpu",
+    "lm_head": "cpu",
+    "attention": "xbar",
+    "xbar_tech": "xbar_transpose",
+    "softmax": "star",
+    "vector": "star",
+    "edge": "cpu",
+    "xbar_scale": 1.25,
+    "vfu_units": 1,
+    "vfu_bw": 64000000000.0,
+    "vfu_mem": 4000000000.0,
+    "star_units": 64,
+    "link": "die",
+    "kv_bits": 8,
+    "xbar_tile": "isaac",
+    "adc_per_ima": 8,
+    "cell_bits": 2
+   },
+   "n": 40,
+   "time_s": 47139.507807728056,
+   "llm_s": 46912.491574786494,
+   "tools_s": 227.0162329415616,
+   "speedup": 0.08024079499025775,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 6636.799999999999,
+   "effort_months": 16.0,
+   "terms": {
+    "host": 46773.29932028083,
+    "launch": 4.213908664062487,
+    "transfer": 48.327694180304135,
+    "softmax_star": 15.081690239156238,
+    "write": 1.1152873278899993,
+    "xbar_transpose": 70.45367409425103
+   }
+  },
+  {
+   "point": {
+    "mvm": "xbar",
+    "lm_head": "xbar",
+    "attention": "xbar",
+    "xbar_tech": "xbar_transpose",
+    "softmax": "star",
+    "vector": "star",
+    "edge": "cpu",
+    "xbar_scale": 1.25,
+    "vfu_units": 1,
+    "vfu_bw": 64000000000.0,
+    "vfu_mem": 4000000000.0,
+    "star_units": 64,
+    "link": "die",
+    "kv_bits": 8,
+    "xbar_tile": "lean",
+    "adc_per_ima": 4,
+    "cell_bits": 2
+   },
+   "n": 41,
+   "time_s": 504.93691408738346,
+   "llm_s": 277.92068114582185,
+   "tools_s": 227.0162329415616,
+   "speedup": 7.491057746843534,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 5669.976708333332,
+   "effort_months": 18.0,
+   "terms": {
+    "host": 2.1203575386760414,
+    "launch": 0.0290614390625,
+    "transfer": 48.12534070105213,
+    "softmax_star": 15.081690239156238,
+    "xbar_transpose": 211.44894389998495,
+    "write": 1.1152873278899993
+   }
+  },
+  {
+   "point": {
+    "mvm": "xbar",
+    "lm_head": "xbar",
+    "attention": "xbar",
+    "xbar_tech": "xbar_transpose",
+    "softmax": "star",
+    "vector": "star",
+    "edge": "cpu",
+    "xbar_scale": 1.25,
+    "vfu_units": 1,
+    "vfu_bw": 64000000000.0,
+    "vfu_mem": 4000000000.0,
+    "star_units": 64,
+    "link": "die",
+    "kv_bits": 8,
+    "xbar_tile": "lean",
+    "adc_per_ima": 8,
+    "cell_bits": 2
+   },
+   "n": 42,
+   "time_s": 399.4886369248841,
+   "llm_s": 172.47240398332247,
+   "tools_s": 227.0162329415616,
+   "speedup": 9.468383408994905,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 7291.212708333332,
+   "effort_months": 18.0,
+   "terms": {
+    "host": 2.1203575386760414,
+    "launch": 0.0290614390625,
+    "transfer": 48.12534070105213,
+    "softmax_star": 15.081690239156238,
+    "xbar_transpose": 106.00066673748555,
+    "write": 1.1152873278899993
+   }
+  },
+  {
+   "point": {
+    "mvm": "xbar",
+    "lm_head": "xbar",
+    "attention": "xbar",
+    "xbar_tech": "xbar_transpose",
+    "softmax": "star",
+    "vector": "star",
+    "edge": "cpu",
+    "xbar_scale": 1.25,
+    "vfu_units": 1,
+    "vfu_bw": 64000000000.0,
+    "vfu_mem": 4000000000.0,
+    "star_units": 64,
+    "link": "die",
+    "kv_bits": 16,
+    "xbar_tile": "isaac",
+    "adc_per_ima": 8,
+    "cell_bits": 2
+   },
+   "n": 43,
+   "time_s": 399.4886369248841,
+   "llm_s": 172.47240398332247,
+   "tools_s": 227.0162329415616,
+   "speedup": 9.468383408994905,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 18796.069999999996,
+   "effort_months": 16.0,
+   "terms": {
+    "host": 2.1203575386760414,
+    "launch": 0.0290614390625,
+    "transfer": 48.12534070105213,
+    "softmax_star": 15.081690239156238,
+    "xbar_transpose": 106.00066673748555,
+    "write": 1.1152873278899993
+   }
+  },
+  {
+   "point": {
+    "mvm": "xbar",
+    "lm_head": "xbar",
+    "attention": "xbar",
+    "xbar_tech": "xbar_transpose",
+    "softmax": "star",
+    "vector": "star",
+    "edge": "cpu",
+    "xbar_scale": 1.0,
+    "vfu_units": 1,
+    "vfu_bw": 64000000000.0,
+    "vfu_mem": 4000000000.0,
+    "star_units": 64,
+    "link": "package",
+    "kv_bits": 8,
+    "xbar_tile": "isaac",
+    "adc_per_ima": 8,
+    "cell_bits": 4
+   },
+   "n": 44,
+   "time_s": 420.95789135767416,
+   "llm_s": 193.94165841611255,
+   "tools_s": 227.0162329415616,
+   "speedup": 8.985486813757543,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 6157.87240506329,
+   "effort_months": 13.0,
+   "terms": {
+    "host": 2.1203575386760414,
+    "launch": 0.174368634375,
+    "transfer": 48.451845777861,
+    "softmax_star": 15.081690239156238,
+    "xbar_transpose": 106.00066673748555,
+    "write": 22.11272948855873
+   }
+  },
+  {
+   "point": {
+    "mvm": "xbar",
+    "lm_head": "xbar",
+    "attention": "xbar",
+    "xbar_tech": "xbar_transpose",
+    "softmax": "star",
+    "vector": "star",
+    "edge": "cpu",
+    "xbar_scale": 1.25,
+    "vfu_units": 1,
+    "vfu_bw": 64000000000.0,
+    "vfu_mem": 4000000000.0,
+    "star_units": 64,
+    "link": "die",
+    "kv_bits": 8,
+    "xbar_tile": "isaac",
+    "adc_per_ima": 4,
+    "cell_bits": 2
+   },
+   "n": 45,
+   "time_s": 504.93691408738346,
+   "llm_s": 277.92068114582185,
+   "tools_s": 227.0162329415616,
+   "speedup": 7.491057746843534,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 10539.314,
+   "effort_months": 16.0,
+   "terms": {
+    "host": 2.1203575386760414,
+    "launch": 0.0290614390625,
+    "transfer": 48.12534070105213,
+    "softmax_star": 15.081690239156238,
+    "xbar_transpose": 211.44894389998495,
+    "write": 1.1152873278899993
+   }
+  },
+  {
+   "point": {
+    "mvm": "xbar",
+    "lm_head": "xbar",
+    "attention": "xbar",
+    "xbar_tech": "xbar_transpose",
+    "softmax": "star",
+    "vector": "star",
+    "edge": "cpu",
+    "xbar_scale": 1.0,
+    "vfu_units": 1,
+    "vfu_bw": 64000000000.0,
+    "vfu_mem": 4000000000.0,
+    "star_units": 64,
+    "link": "die",
+    "kv_bits": 8,
+    "xbar_tile": "lean",
+    "adc_per_ima": 8,
+    "cell_bits": 4
+   },
+   "n": 46,
+   "time_s": 420.4860790855528,
+   "llm_s": 193.4698461439912,
+   "tools_s": 227.0162329415616,
+   "speedup": 8.995569104612297,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 3692.3851687763704,
+   "effort_months": 21.0,
+   "terms": {
+    "host": 2.1203575386760414,
+    "launch": 0.0290614390625,
+    "transfer": 48.12534070105213,
+    "softmax_star": 15.081690239156238,
+    "xbar_transpose": 106.00066673748555,
+    "write": 22.11272948855873
+   }
+  },
+  {
+   "point": {
+    "mvm": "xbar",
+    "lm_head": "xbar",
+    "attention": "xbar",
+    "xbar_tech": "xbar_transpose",
+    "softmax": "star",
+    "vector": "star",
+    "edge": "cpu",
+    "xbar_scale": 1.5,
+    "vfu_units": 1,
+    "vfu_bw": 64000000000.0,
+    "vfu_mem": 4000000000.0,
+    "star_units": 64,
+    "link": "die",
+    "kv_bits": 8,
+    "xbar_tile": "isaac",
+    "adc_per_ima": 8,
+    "cell_bits": 2
+   },
+   "n": 47,
+   "time_s": 399.4886369248841,
+   "llm_s": 172.47240398332247,
+   "tools_s": 227.0162329415616,
+   "speedup": 9.468383408994905,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 14592.404,
+   "effort_months": 16.0,
+   "terms": {
+    "host": 2.1203575386760414,
+    "launch": 0.0290614390625,
+    "transfer": 48.12534070105213,
+    "softmax_star": 15.081690239156238,
+    "xbar_transpose": 106.00066673748555,
+    "write": 1.1152873278899993
+   }
+  },
+  {
+   "point": {
+    "mvm": "xbar",
+    "lm_head": "xbar",
+    "attention": "xbar",
+    "xbar_tech": "xbar_transpose",
+    "softmax": "star",
+    "vector": "star",
+    "edge": "cpu",
+    "xbar_scale": 1.0,
+    "vfu_units": 1,
+    "vfu_bw": 64000000000.0,
+    "vfu_mem": 4000000000.0,
+    "star_units": 64,
+    "link": "die",
+    "kv_bits": 8,
+    "xbar_tile": "isaac",
+    "adc_per_ima": 4,
+    "cell_bits": 2
+   },
+   "n": 48,
+   "time_s": 504.95407869723726,
+   "llm_s": 277.93784575567565,
+   "tools_s": 227.0162329415616,
+   "speedup": 7.4908031076812,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 8431.7072,
+   "effort_months": 16.0,
+   "terms": {
+    "host": 2.1203575386760414,
+    "launch": 0.0290614390625,
+    "transfer": 48.12534070105213,
+    "softmax_star": 15.081690239156238,
+    "xbar_transpose": 211.44894389998495,
+    "write": 1.1324519377437698
+   }
+  },
+  {
+   "point": {
+    "mvm": "xbar",
+    "lm_head": "xbar",
+    "attention": "vfu",
+    "xbar_tech": "xbar_transpose",
+    "softmax": "star",
+    "vector": "star",
+    "edge": "cpu",
+    "xbar_scale": 1.25,
+    "vfu_units": 64,
+    "vfu_bw": 256000000000.0,
+    "vfu_mem": 16000000000.0,
+    "star_units": 64,
+    "link": "die",
+    "kv_bits": 8,
+    "xbar_tile": "isaac",
+    "adc_per_ima": 8,
+    "cell_bits": 2
+   },
+   "n": 49,
+   "time_s": 22934.631628537038,
+   "llm_s": 22707.615395595476,
+   "tools_s": 227.0162329415616,
+   "speedup": 0.16492576132049444,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 5525.286,
+   "effort_months": 18.0,
+   "terms": {
+    "host": 2.1203575386760414,
+    "launch": 0.0290614390625,
+    "transfer": 48.4160037564121,
+    "softmax_star": 15.081690239156238,
+    "xbar_transpose": 35.54699264323435,
+    "write": 0.2793911023125,
+    "vfu_puma": 22606.141898876624
+   }
+  },
+  {
+   "point": {
+    "mvm": "xbar",
+    "lm_head": "xbar",
+    "attention": "xbar",
+    "xbar_tech": "xbar_transpose",
+    "softmax": "star",
+    "vector": "star",
+    "edge": "cpu",
+    "xbar_scale": 1.25,
+    "vfu_units": 1,
+    "vfu_bw": 64000000000.0,
+    "vfu_mem": 4000000000.0,
+    "star_units": 64,
+    "link": "cxl",
+    "kv_bits": 8,
+    "xbar_tile": "isaac",
+    "adc_per_ima": 8,
+    "cell_bits": 2
+   },
+   "n": 50,
+   "time_s": 401.68198714139606,
+   "llm_s": 174.66575419983445,
+   "tools_s": 227.0162329415616,
+   "speedup": 9.416682109297772,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 12160.55,
+   "effort_months": 7.0,
+   "terms": {
+    "host": 2.1203575386760414,
+    "launch": 0.58122878125,
+    "transfer": 49.76652357537663,
+    "softmax_star": 15.081690239156238,
+    "xbar_transpose": 106.00066673748555,
+    "write": 1.1152873278899993
+   }
+  }
+ ],
+ "accepted": [
+  {
+   "move": {
+    "changes": {
+     "lm_head": "xbar"
+    },
+    "why": "Offloading lm_head to the crossbars removes the largest remaining CPU-side matrix op while keeping the current cell_bits and scale.",
+    "agent": "placer"
+   },
+   "reading": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "n": 2,
+   "time_s": 91819.47865475198,
+   "llm_s": 91592.46242181041,
+   "tools_s": 227.0162329415616,
+   "speedup": 0.04119508885651687,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 4762.7,
+   "effort_months": 0.0,
+   "terms": {
+    "host": 91379.81040460811,
+    "launch": 84.27817328124985,
+    "transfer": 92.82685127781254,
+    "xbar_isaac": 35.54699264323435
+   }
+  },
+  {
+   "move": {
+    "changes": {
+     "attention": "vfu",
+     "softmax": "vfu",
+     "vfu_units": "64",
+     "vfu_bw": "1000000000000.0",
+     "vfu_mem": "64000000000.0",
+     "kv_bits": "8"
+    },
+    "why": "Move attention to a high-bandwidth, larger vector-unit KV memory with 8-bit KV and many lanes, since decode attention is memory-bound, and offload softmax to the same VFU to avoid CPU round trips.",
+    "agent": "attn"
+   },
+   "reading": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "n": 3,
+   "time_s": 24469.637335573043,
+   "llm_s": 24242.62110263148,
+   "tools_s": 227.0162329415616,
+   "speedup": 0.1545797974064245,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 4762.956,
+   "effort_months": 4.0,
+   "terms": {
+    "host": 1202.6116869155028,
+    "launch": 84.27817328124985,
+    "transfer": 93.1175143331726,
+    "xbar_isaac": 35.54699264323435,
+    "write": 0.11044320138450006,
+    "vfu_puma": 22826.95629225694
+   }
+  },
+  {
+   "move": {
+    "changes": {
+     "link": "package"
+    },
+    "why": "Fallback: upgrade only the link to package, to measure the transfer-overhead gain alone.",
+    "agent": "rest"
+   },
+   "reading": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "n": 4,
+   "time_s": 24338.653968534218,
+   "llm_s": 24111.637735592656,
+   "tools_s": 227.0162329415616,
+   "speedup": 0.15541169971156632,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 4762.956,
+   "effort_months": 7.0,
+   "terms": {
+    "host": 1202.6116869155028,
+    "launch": 25.283451984374995,
+    "transfer": 21.128868591219348,
+    "xbar_isaac": 35.54699264323435,
+    "write": 0.11044320138450006,
+    "vfu_puma": 22826.95629225694
+   }
+  },
+  {
+   "move": {
+    "changes": {
+     "vfu_units": "256"
+    },
+    "why": "Moving KV to 16-bit-free 8-bit is already set; try a 256-lane vector unit to speed up attention compute.",
+    "agent": "attn"
+   },
+   "reading": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "n": 10,
+   "time_s": 7218.55444816971,
+   "llm_s": 6991.538215228148,
+   "tools_s": 227.0162329415616,
+   "speedup": 0.5239984832282634,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 4763.724,
+   "effort_months": 7.0,
+   "terms": {
+    "host": 1202.6116869155028,
+    "launch": 25.283451984374995,
+    "transfer": 21.128868591219348,
+    "xbar_isaac": 35.54699264323435,
+    "write": 0.11044320138450006,
+    "vfu_puma": 5706.856771892432
+   }
+  },
+  {
+   "move": {
+    "changes": {
+     "vector": "vfu",
+     "link": "die"
+    },
+    "why": "Moving only the vector ops to the VFU, with the die link, separates the vector effect from the edge effect.",
+    "agent": "rest"
+   },
+   "reading": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "n": 11,
+   "time_s": 5979.511799702988,
+   "llm_s": 5752.495566761427,
+   "tools_s": 227.0162329415616,
+   "speedup": 0.6325786633834296,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 4763.724,
+   "effort_months": 13.0,
+   "terms": {
+    "host": 2.1203575386760414,
+    "launch": 0.0290614390625,
+    "transfer": 2.9132661456600113,
+    "vfu_puma": 5711.77544579341,
+    "xbar_isaac": 35.54699264323435,
+    "write": 0.11044320138450006
+   }
+  },
+  {
+   "move": {
+    "changes": {
+     "attention": "xbar",
+     "xbar_tech": "xbar_transpose"
+    },
+    "why": "Move attention to crossbars with transpose flavor (cheap K append) while keeping softmax on the existing vfu path as a first test.",
+    "agent": "attn"
+   },
+   "reading": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "n": 18,
+   "time_s": 1158.1533757761802,
+   "llm_s": 931.1371428346185,
+   "tools_s": 227.0162329415616,
+   "speedup": 3.2659850250029008,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 12160.293999999998,
+   "effort_months": 13.0,
+   "terms": {
+    "host": 2.1203575386760414,
+    "launch": 0.0290614390625,
+    "transfer": 48.12534070105213,
+    "vfu_puma": 773.7464290904524,
+    "xbar_transpose": 106.00066673748555,
+    "write": 1.1152873278899993
+   }
+  },
+  {
+   "move": {
+    "changes": {
+     "softmax": "star",
+     "star_units": "16"
+    },
+    "why": "Move softmax to the star fixed-function unit with 16 instances to cut softmax time; vfu_units is already at max (256).",
+    "agent": "attn"
+   },
+   "reading": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "n": 24,
+   "time_s": 506.87384519149344,
+   "llm_s": 279.85761224993183,
+   "tools_s": 227.0162329415616,
+   "speedup": 7.462431959795746,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 12160.613999999998,
+   "effort_months": 17.0,
+   "terms": {
+    "host": 2.1203575386760414,
+    "launch": 0.0290614390625,
+    "transfer": 48.12534070105213,
+    "vfu_puma": 67.25545357214068,
+    "xbar_transpose": 106.00066673748555,
+    "write": 1.1152873278899993,
+    "softmax_star": 55.211444933624946
+   }
+  },
+  {
+   "move": {
+    "changes": {
+     "vector": "star"
+    },
+    "why": "Vector ops on the star unit may cut elementwise overhead versus vfu, while edge stays on cpu to remain legal.",
+    "agent": "rest"
+   },
+   "reading": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "n": 27,
+   "time_s": 444.2297822890091,
+   "llm_s": 217.2135493474475,
+   "tools_s": 227.0162329415616,
+   "speedup": 8.514763603761978,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 12159.589999999998,
+   "effort_months": 16.0,
+   "terms": {
+    "host": 2.1203575386760414,
+    "launch": 0.0290614390625,
+    "transfer": 48.12534070105213,
+    "softmax_star": 59.82283560328127,
+    "xbar_transpose": 106.00066673748555,
+    "write": 1.1152873278899993
+   }
+  },
+  {
+   "move": {
+    "changes": {
+     "star_units": "64"
+    },
+    "why": "Softmax is already on star, so scale star_units to the largest option (64) to cut softmax time. The requested 2-8 and kv_bits 4 aren't available options.",
+    "agent": "attn"
+   },
+   "reading": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "n": 30,
+   "time_s": 399.4886369248841,
+   "llm_s": 172.47240398332247,
+   "tools_s": 227.0162329415616,
+   "speedup": 9.468383408994905,
+   "feasible": true,
+   "reason": "",
+   "area_mm2": 12160.55,
+   "effort_months": 16.0,
+   "terms": {
+    "host": 2.1203575386760414,
+    "launch": 0.0290614390625,
+    "transfer": 48.12534070105213,
+    "softmax_star": 15.081690239156238,
+    "xbar_transpose": 106.00066673748555,
+    "write": 1.1152873278899993
+   }
+  }
+ ],
+ "log": [
+  {
+   "eval_n": 2,
+   "kind": "proposal",
+   "move": {
+    "lm_head": "xbar"
+   },
+   "why": "Offloading lm_head to the crossbars removes the largest remaining CPU-side matrix op while keeping the current cell_bits and scale.",
+   "agent": "placer",
+   "outcome": "accepted",
+   "time_s": 91819.47865475198,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 0.04119508885651687
+  },
+  {
+   "eval_n": 3,
+   "kind": "proposal",
+   "move": {
+    "attention": "vfu",
+    "softmax": "vfu",
+    "vfu_units": "64",
+    "vfu_bw": "1000000000000.0",
+    "vfu_mem": "64000000000.0",
+    "kv_bits": "8"
+   },
+   "why": "Move attention to a high-bandwidth, larger vector-unit KV memory with 8-bit KV and many lanes, since decode attention is memory-bound, and offload softmax to the same VFU to avoid CPU round trips.",
+   "agent": "attn",
+   "outcome": "accepted",
+   "time_s": 24469.637335573043,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 0.1545797974064245
+  },
+  {
+   "eval_n": 3,
+   "kind": "proposal",
+   "move": {
+    "vector": "vfu",
+    "edge": "vfu",
+    "link": "package"
+   },
+   "why": "Move vector ops and edge ops to PIM together with a faster package-level link to cut CPU work and transfer overhead in one step.",
+   "agent": "rest",
+   "outcome": "illegal",
+   "time_s": null,
+   "violations": [
+    [
+     "R1.sampling",
+     "sample",
+     "sample is sampling: it needs the full logits, an RNG and the token on the host; vfu_puma does not list 'sampling'"
+    ],
+    [
+     "R2.transfer",
+     "embed",
+     "embed on vfu_puma: the token must cross in from the host every step (~0.10 us at 256 GB/s), and the integrator charges no transfer for it"
+    ],
+    [
+     "R2.transfer",
+     "sample",
+     "sample on vfu_puma: the token must cross back to the host every step (~0.40 us at 256 GB/s), and the integrator charges no transfer for it"
+    ]
+   ],
+   "verify": {
+    "legal": false,
+    "violations": [
+     [
+      "R1.sampling",
+      "sample",
+      "sample is sampling: it needs the full logits, an RNG and the token on the host; vfu_puma does not list 'sampling'"
+     ],
+     [
+      "R2.transfer",
+      "embed",
+      "embed on vfu_puma: the token must cross in from the host every step (~0.10 us at 256 GB/s), and the integrator charges no transfer for it"
+     ],
+     [
+      "R2.transfer",
+      "sample",
+      "sample on vfu_puma: the token must cross back to the host every step (~0.40 us at 256 GB/s), and the integrator charges no transfer for it"
+     ]
+    ],
+    "summary": "R1.sampling: sample; R2.transfer: embed (+1)"
+   }
+  },
+  {
+   "eval_n": 3,
+   "kind": "proposal",
+   "move": {
+    "vector": "vfu",
+    "edge": "vfu"
+   },
+   "why": "Fallback: offload vector ops to vfu and edge ops to vfu while keeping the cxl link, to isolate the offload gain from the link gain.",
+   "agent": "rest",
+   "outcome": "illegal",
+   "time_s": null,
+   "violations": [
+    [
+     "R1.sampling",
+     "sample",
+     "sample is sampling: it needs the full logits, an RNG and the token on the host; vfu_puma does not list 'sampling'"
+    ],
+    [
+     "R2.transfer",
+     "embed",
+     "embed on vfu_puma: the token must cross in from the host every step (~0.50 us at 64 GB/s), and the integrator charges no transfer for it"
+    ],
+    [
+     "R2.transfer",
+     "sample",
+     "sample on vfu_puma: the token must cross back to the host every step (~1.50 us at 64 GB/s), and the integrator charges no transfer for it"
+    ]
+   ],
+   "verify": {
+    "legal": false,
+    "violations": [
+     [
+      "R1.sampling",
+      "sample",
+      "sample is sampling: it needs the full logits, an RNG and the token on the host; vfu_puma does not list 'sampling'"
+     ],
+     [
+      "R2.transfer",
+      "embed",
+      "embed on vfu_puma: the token must cross in from the host every step (~0.50 us at 64 GB/s), and the integrator charges no transfer for it"
+     ],
+     [
+      "R2.transfer",
+      "sample",
+      "sample on vfu_puma: the token must cross back to the host every step (~1.50 us at 64 GB/s), and the integrator charges no transfer for it"
+     ]
+    ],
+    "summary": "R1.sampling: sample; R2.transfer: embed (+1)"
+   }
+  },
+  {
+   "eval_n": 4,
+   "kind": "proposal",
+   "move": {
+    "link": "package"
+   },
+   "why": "Fallback: upgrade only the link to package, to measure the transfer-overhead gain alone.",
+   "agent": "rest",
+   "outcome": "accepted",
+   "time_s": 24338.653968534218,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 0.15541169971156632
+  },
+  {
+   "eval_n": 5,
+   "kind": "proposal",
+   "move": {
+    "xbar_tile": "lean"
+   },
+   "why": "Lean tiles cut tile area 47% with no ADC slowdown, likely the cheapest area trim if time is unaffected.",
+   "agent": "area",
+   "outcome": "slower",
+   "time_s": 24338.653968534218,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 0.15541169971156632
+  },
+  {
+   "eval_n": 6,
+   "kind": "proposal",
+   "move": {
+    "xbar_tile": "lean",
+    "adc_per_ima": "4"
+   },
+   "why": "Combine lean tile with 4 ADCs per IMA for further area savings at a moderate read-time cost.",
+   "agent": "area",
+   "outcome": "slower",
+   "time_s": 24373.958388596715,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 0.1551865938899444
+  },
+  {
+   "eval_n": 7,
+   "kind": "proposal",
+   "move": {
+    "xbar_scale": "1.0"
+   },
+   "why": "Trim crossbar over-provisioning to 1.0x the longest-context need, saving area/power while staying feasible.",
+   "agent": "placer",
+   "outcome": "slower",
+   "time_s": 24338.653968534218,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 0.15541169971156632
+  },
+  {
+   "eval_n": 8,
+   "kind": "proposal",
+   "move": {
+    "cell_bits": "4",
+    "xbar_scale": "1.0"
+   },
+   "why": "4-bit cells halve the arrays, freeing area and likely reducing latency/energy per MVM.",
+   "agent": "placer",
+   "outcome": "slower",
+   "time_s": 24338.653968534218,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 0.15541169971156632
+  },
+  {
+   "eval_n": 8,
+   "kind": "proposal",
+   "move": {
+    "cell_bits": "4",
+    "xbar_scale": "0.75"
+   },
+   "why": "Combine 4-bit cells with a more aggressive 0.75x array count to probe the feasibility edge.",
+   "agent": "placer",
+   "outcome": "illegal",
+   "time_s": null,
+   "violations": [
+    [
+     "R3.capacity",
+     "xbar_isaac",
+     "over capacity from ctx 1189 (django__django-16100 turn 0); at ctx 65536 needs 4.91e+05 arrays, has 3.682e+05 (holds lm_head 0.39 GB, w.down_proj 0.90 GB, w.gate_proj 0.90 GB, w.k_proj 0.09 GB, w.o_proj 0.38 GB, w.q_proj 0.38 GB, w.up_proj 0.90 GB, w.v_proj 0.09 GB)"
+    ]
+   ],
+   "verify": {
+    "legal": false,
+    "violations": [
+     [
+      "R3.capacity",
+      "xbar_isaac",
+      "over capacity from ctx 1189 (django__django-16100 turn 0); at ctx 65536 needs 4.91e+05 arrays, has 3.682e+05 (holds lm_head 0.39 GB, w.down_proj 0.90 GB, w.gate_proj 0.90 GB, w.k_proj 0.09 GB, w.o_proj 0.38 GB, w.q_proj 0.38 GB, w.up_proj 0.90 GB, w.v_proj 0.09 GB)"
+     ]
+    ],
+    "summary": "R3.capacity: xbar_isaac"
+   }
+  },
+  {
+   "eval_n": 9,
+   "kind": "proposal",
+   "move": {
+    "softmax": "star",
+    "star_units": "16"
+   },
+   "why": "Star fixed-function softmax with 16 units should beat the VFU softmax while keeping attention on the vfu.",
+   "agent": "attn",
+   "outcome": "slower",
+   "time_s": 24218.263094642916,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 0.15618426338667754
+  },
+  {
+   "eval_n": 10,
+   "kind": "proposal",
+   "move": {
+    "vfu_units": "256"
+   },
+   "why": "Moving KV to 16-bit-free 8-bit is already set; try a 256-lane vector unit to speed up attention compute.",
+   "agent": "attn",
+   "outcome": "accepted",
+   "time_s": 7218.55444816971,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 0.5239984832282634
+  },
+  {
+   "eval_n": 10,
+   "kind": "proposal",
+   "move": {
+    "vector": "vfu",
+    "edge": "vfu",
+    "link": "die"
+   },
+   "why": "Moving vector ops and edge ops to the VFU while also upgrading the link to die tests the full proposal at once, and it should cut CPU-side work and transfer overhead.",
+   "agent": "rest",
+   "outcome": "illegal",
+   "time_s": null,
+   "violations": [
+    [
+     "R1.sampling",
+     "sample",
+     "sample is sampling: it needs the full logits, an RNG and the token on the host; vfu_puma does not list 'sampling'"
+    ],
+    [
+     "R2.transfer",
+     "embed",
+     "embed on vfu_puma: the token must cross in from the host every step (~0.00 us at 1000 GB/s), and the integrator charges no transfer for it"
+    ],
+    [
+     "R2.transfer",
+     "sample",
+     "sample on vfu_puma: the token must cross back to the host every step (~0.05 us at 1000 GB/s), and the integrator charges no transfer for it"
+    ]
+   ],
+   "verify": {
+    "legal": false,
+    "violations": [
+     [
+      "R1.sampling",
+      "sample",
+      "sample is sampling: it needs the full logits, an RNG and the token on the host; vfu_puma does not list 'sampling'"
+     ],
+     [
+      "R2.transfer",
+      "embed",
+      "embed on vfu_puma: the token must cross in from the host every step (~0.00 us at 1000 GB/s), and the integrator charges no transfer for it"
+     ],
+     [
+      "R2.transfer",
+      "sample",
+      "sample on vfu_puma: the token must cross back to the host every step (~0.05 us at 1000 GB/s), and the integrator charges no transfer for it"
+     ]
+    ],
+    "summary": "R1.sampling: sample; R2.transfer: embed (+1)"
+   }
+  },
+  {
+   "eval_n": 10,
+   "kind": "proposal",
+   "move": {
+    "vector": "vfu",
+    "edge": "vfu"
+   },
+   "why": "This isolates the offload gain from the link upgrade, so the team can see which part helps if the combined move fails.",
+   "agent": "rest",
+   "outcome": "illegal",
+   "time_s": null,
+   "violations": [
+    [
+     "R1.sampling",
+     "sample",
+     "sample is sampling: it needs the full logits, an RNG and the token on the host; vfu_puma does not list 'sampling'"
+    ],
+    [
+     "R2.transfer",
+     "embed",
+     "embed on vfu_puma: the token must cross in from the host every step (~0.10 us at 256 GB/s), and the integrator charges no transfer for it"
+    ],
+    [
+     "R2.transfer",
+     "sample",
+     "sample on vfu_puma: the token must cross back to the host every step (~0.40 us at 256 GB/s), and the integrator charges no transfer for it"
+    ]
+   ],
+   "verify": {
+    "legal": false,
+    "violations": [
+     [
+      "R1.sampling",
+      "sample",
+      "sample is sampling: it needs the full logits, an RNG and the token on the host; vfu_puma does not list 'sampling'"
+     ],
+     [
+      "R2.transfer",
+      "embed",
+      "embed on vfu_puma: the token must cross in from the host every step (~0.10 us at 256 GB/s), and the integrator charges no transfer for it"
+     ],
+     [
+      "R2.transfer",
+      "sample",
+      "sample on vfu_puma: the token must cross back to the host every step (~0.40 us at 256 GB/s), and the integrator charges no transfer for it"
+     ]
+    ],
+    "summary": "R1.sampling: sample; R2.transfer: embed (+1)"
+   }
+  },
+  {
+   "eval_n": 11,
+   "kind": "proposal",
+   "move": {
+    "vector": "vfu",
+    "link": "die"
+   },
+   "why": "Moving only the vector ops to the VFU, with the die link, separates the vector effect from the edge effect.",
+   "agent": "rest",
+   "outcome": "accepted",
+   "time_s": 5979.511799702988,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 0.6325786633834296
+  },
+  {
+   "eval_n": 12,
+   "kind": "proposal",
+   "move": {
+    "xbar_tile": "lean"
+   },
+   "why": "Lean tiles cut tile area 47% with no ADC slowdown, the cheapest area trade first.",
+   "agent": "area",
+   "outcome": "slower",
+   "time_s": 5979.511799702988,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 0.6325786633834296
+  },
+  {
+   "eval_n": 13,
+   "kind": "proposal",
+   "move": {
+    "adc_per_ima": "4"
+   },
+   "why": "Halving ADCs to 4 trims area at a modest read-time cost, a probe of the area/time tradeoff.",
+   "agent": "area",
+   "outcome": "slower",
+   "time_s": 6014.816219765489,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 0.6288656949337411
+  },
+  {
+   "eval_n": 14,
+   "kind": "proposal",
+   "move": {
+    "xbar_tile": "lean",
+    "adc_per_ima": "4"
+   },
+   "why": "Combined lean tile and 4 ADCs for a larger area reduction if time stays within tolerance.",
+   "agent": "area",
+   "outcome": "slower",
+   "time_s": 6014.816219765489,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 0.6288656949337411
+  },
+  {
+   "eval_n": 15,
+   "kind": "proposal",
+   "move": {
+    "xbar_scale": "2.0"
+   },
+   "why": "Capacity needs about 1.34x more arrays than the 1.25 scale gives, so 2.0 is the smallest option that fits the 65536-token context.",
+   "agent": "placer",
+   "outcome": "slower",
+   "time_s": 5979.511799702988,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 0.6325786633834296
+  },
+  {
+   "eval_n": 16,
+   "kind": "proposal",
+   "move": {
+    "cell_bits": "4"
+   },
+   "why": "4-bit cells halve the arrays needed, so this tests whether the design fits at a smaller scale and area.",
+   "agent": "placer",
+   "outcome": "slower",
+   "time_s": 5979.511799702988,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 0.6325786633834296
+  },
+  {
+   "eval_n": 17,
+   "kind": "proposal",
+   "move": {
+    "cell_bits": "4",
+    "xbar_scale": "1.0"
+   },
+   "why": "This is a smaller-area variant with 4-bit cells, to see whether a tighter scale is still legal and feasible.",
+   "agent": "placer",
+   "outcome": "slower",
+   "time_s": 5979.511799702988,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 0.6325786633834296
+  },
+  {
+   "eval_n": 18,
+   "kind": "proposal",
+   "move": {
+    "attention": "xbar",
+    "xbar_tech": "xbar_transpose"
+   },
+   "why": "Move attention to crossbars with transpose flavor (cheap K append) while keeping softmax on the existing vfu path as a first test.",
+   "agent": "attn",
+   "outcome": "accepted",
+   "time_s": 1158.1533757761802,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 3.2659850250029008
+  },
+  {
+   "eval_n": 18,
+   "kind": "proposal",
+   "move": {
+    "edge": "vfu"
+   },
+   "why": "With the die link and VFU vector ops already in place, moving embedding and sampling to the VFU removes the CPU round trips for the edge ops.",
+   "agent": "rest",
+   "outcome": "illegal",
+   "time_s": null,
+   "violations": [
+    [
+     "R1.sampling",
+     "sample",
+     "sample is sampling: it needs the full logits, an RNG and the token on the host; vfu_puma does not list 'sampling'"
+    ],
+    [
+     "R2.transfer",
+     "embed",
+     "embed on vfu_puma: the token must cross in from the host every step (~0.00 us at 1000 GB/s), and the integrator charges no transfer for it"
+    ],
+    [
+     "R2.transfer",
+     "sample",
+     "sample on vfu_puma: the token must cross back to the host every step (~0.05 us at 1000 GB/s), and the integrator charges no transfer for it"
+    ]
+   ],
+   "verify": {
+    "legal": false,
+    "violations": [
+     [
+      "R1.sampling",
+      "sample",
+      "sample is sampling: it needs the full logits, an RNG and the token on the host; vfu_puma does not list 'sampling'"
+     ],
+     [
+      "R2.transfer",
+      "embed",
+      "embed on vfu_puma: the token must cross in from the host every step (~0.00 us at 1000 GB/s), and the integrator charges no transfer for it"
+     ],
+     [
+      "R2.transfer",
+      "sample",
+      "sample on vfu_puma: the token must cross back to the host every step (~0.05 us at 1000 GB/s), and the integrator charges no transfer for it"
+     ]
+    ],
+    "summary": "R1.sampling: sample; R2.transfer: embed (+1)"
+   }
+  },
+  {
+   "eval_n": 19,
+   "kind": "proposal",
+   "move": {
+    "cell_bits": "4"
+   },
+   "why": "Moving attention onto crossbars likely overflows capacity, and 4-bit cells halve the array count to fix it.",
+   "agent": "capacity",
+   "outcome": "slower",
+   "time_s": 1178.9580437920401,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 3.208351308054496
+  },
+  {
+   "eval_n": 20,
+   "kind": "proposal",
+   "move": {
+    "cell_bits": "4",
+    "xbar_scale": "1.0"
+   },
+   "why": "If 4-bit cells alone are still tight or have slack, trimming xbar_scale to 1.0 with 4-bit cells cuts area.",
+   "agent": "capacity",
+   "outcome": "slower",
+   "time_s": 1179.1508179368489,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 3.207826788908813
+  },
+  {
+   "eval_n": 21,
+   "kind": "proposal",
+   "move": {
+    "cell_bits": "4",
+    "xbar_tile": "lean"
+   },
+   "why": "Lean tiles cut area with no read-time cost, so this checks whether the time stays the same.",
+   "agent": "capacity",
+   "outcome": "slower",
+   "time_s": 1178.9580437920401,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 3.208351308054496
+  },
+  {
+   "eval_n": 22,
+   "kind": "proposal",
+   "move": {
+    "lm_head": "cpu"
+   },
+   "why": "The weight MVMs are already on xbar, so the most informative different test is moving only lm_head to cpu to see whether the vocabulary projection is better off there.",
+   "agent": "placer",
+   "outcome": "slower",
+   "time_s": 3187.1036466758683,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 1.1868178764398518
+  },
+  {
+   "eval_n": 23,
+   "kind": "proposal",
+   "move": {
+    "mvm": "cpu"
+   },
+   "why": "Moving the per-layer MVMs to cpu while keeping lm_head on xbar measures how much the xbar MVM placement contributes.",
+   "agent": "placer",
+   "outcome": "slower",
+   "time_s": 45869.22227567966,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 0.08246295433587696
+  },
+  {
+   "eval_n": 24,
+   "kind": "proposal",
+   "move": {
+    "softmax": "star",
+    "star_units": "16"
+   },
+   "why": "Move softmax to the star fixed-function unit with 16 instances to cut softmax time; vfu_units is already at max (256).",
+   "agent": "attn",
+   "outcome": "accepted",
+   "time_s": 506.87384519149344,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 7.462431959795746
+  },
+  {
+   "eval_n": 25,
+   "kind": "proposal",
+   "move": {
+    "lm_head": "cpu"
+   },
+   "why": "Re-test lm_head on CPU on top of the much faster star-softmax design to see whether the vocabulary projection now matters relative to the xbar placement.",
+   "agent": "placer",
+   "outcome": "slower",
+   "time_s": 2535.8241160911816,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 1.491630100817904
+  },
+  {
+   "eval_n": 26,
+   "kind": "proposal",
+   "move": {
+    "mvm": "cpu"
+   },
+   "why": "Re-test CPU placement of the 7 per-layer weight MVMs to confirm xbar still dominates and see how large the MVM share of remaining time is.",
+   "agent": "placer",
+   "outcome": "slower",
+   "time_s": 45217.94274509497,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 0.0836506782996418
+  },
+  {
+   "eval_n": 27,
+   "kind": "proposal",
+   "move": {
+    "vector": "star"
+   },
+   "why": "Vector ops on the star unit may cut elementwise overhead versus vfu, while edge stays on cpu to remain legal.",
+   "agent": "rest",
+   "outcome": "accepted",
+   "time_s": 444.2297822890091,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 8.514763603761978
+  },
+  {
+   "eval_n": 28,
+   "kind": "proposal",
+   "move": {
+    "xbar_scale": "2.0"
+   },
+   "why": "More crossbar replicas (2.0x) may add parallelism for the MVMs and cut time, with ADCs already at the maximum of 8.",
+   "agent": "capacity",
+   "outcome": "slower",
+   "time_s": 444.2297822890091,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 8.514763603761978
+  },
+  {
+   "eval_n": 29,
+   "kind": "proposal",
+   "move": {
+    "xbar_scale": "1.5"
+   },
+   "why": "A smaller step to 1.5x tests whether the speed gain from extra arrays shows up at lower area cost.",
+   "agent": "capacity",
+   "outcome": "slower",
+   "time_s": 444.2297822890091,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 8.514763603761978
+  },
+  {
+   "eval_n": 30,
+   "kind": "proposal",
+   "move": {
+    "star_units": "64"
+   },
+   "why": "Softmax is already on star, so scale star_units to the largest option (64) to cut softmax time. The requested 2-8 and kv_bits 4 aren't available options.",
+   "agent": "attn",
+   "outcome": "accepted",
+   "time_s": 399.4886369248841,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 9.468383408994905
+  },
+  {
+   "eval_n": 31,
+   "kind": "proposal",
+   "move": {
+    "lm_head": "cpu"
+   },
+   "why": "mvm=cpu was about 100x slower in earlier tests, so lm_head=cpu is the only placement variant worth a fresh check on the 399.5 s design; the result also shows whether lm_head or the mvms dominate the remaining time.",
+   "agent": "placer",
+   "outcome": "slower",
+   "time_s": 2428.438907824572,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 1.557589762605964
+  },
+  {
+   "eval_n": 31,
+   "kind": "proposal",
+   "move": {
+    "edge": "vfu"
+   },
+   "why": "Moving embedding lookup and sampling to the VFU removes CPU-side transfer for the edge ops, and the link is already at its fastest.",
+   "agent": "rest",
+   "outcome": "illegal",
+   "time_s": null,
+   "violations": [
+    [
+     "R1.sampling",
+     "sample",
+     "sample is sampling: it needs the full logits, an RNG and the token on the host; vfu_puma does not list 'sampling'"
+    ],
+    [
+     "R2.transfer",
+     "embed",
+     "embed on vfu_puma: the token must cross in from the host every step (~0.00 us at 1000 GB/s), and the integrator charges no transfer for it"
+    ],
+    [
+     "R2.transfer",
+     "sample",
+     "sample on vfu_puma: the token must cross back to the host every step (~0.05 us at 1000 GB/s), and the integrator charges no transfer for it"
+    ]
+   ],
+   "verify": {
+    "legal": false,
+    "violations": [
+     [
+      "R1.sampling",
+      "sample",
+      "sample is sampling: it needs the full logits, an RNG and the token on the host; vfu_puma does not list 'sampling'"
+     ],
+     [
+      "R2.transfer",
+      "embed",
+      "embed on vfu_puma: the token must cross in from the host every step (~0.00 us at 1000 GB/s), and the integrator charges no transfer for it"
+     ],
+     [
+      "R2.transfer",
+      "sample",
+      "sample on vfu_puma: the token must cross back to the host every step (~0.05 us at 1000 GB/s), and the integrator charges no transfer for it"
+     ]
+    ],
+    "summary": "R1.sampling: sample; R2.transfer: embed (+1)"
+   }
+  },
+  {
+   "eval_n": 32,
+   "kind": "proposal",
+   "move": {
+    "cell_bits": "4"
+   },
+   "why": "4-bit cells halve arrays and give faster row writes, which may cut time on the current design.",
+   "agent": "capacity",
+   "outcome": "slower",
+   "time_s": 420.29330494074406,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 8.999695064081136
+  },
+  {
+   "eval_n": 33,
+   "kind": "proposal",
+   "move": {
+    "xbar_scale": "1.0"
+   },
+   "why": "More ADCs per IMA is already max at 8, so test xbar_scale 1.0 as a neighbour to see if the capacity trade-off helps speed.",
+   "agent": "capacity",
+   "outcome": "slower",
+   "time_s": 399.5058015347378,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 9.467976603620523
+  },
+  {
+   "eval_n": 34,
+   "kind": "proposal",
+   "move": {
+    "attention": "vfu",
+    "vfu_units": "256",
+    "vfu_bw": "1000000000000.0",
+    "vfu_mem": "16000000000.0"
+   },
+   "why": "Raise vfu_units to 256 for attention/softmax lanes (with a larger KV memory) to test whether VFU attention beats the xbar path; try star_units 16 is not helpful, so keep star.",
+   "agent": "attn",
+   "outcome": "slower",
+   "time_s": 5979.934722364109,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 0.6325339251272266
+  },
+  {
+   "eval_n": 30,
+   "kind": "proposal",
+   "move": {
+    "vfu_units": "256",
+    "vfu_mem": "16000000000.0"
+   },
+   "why": "Keep xbar attention but use larger vfu_units and 16 GB KV memory at 8-bit as a cheaper probe of any VFU-side gain.",
+   "agent": "attn",
+   "outcome": "duplicate",
+   "time_s": 399.4886369248841,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 9.468383408994905
+  },
+  {
+   "eval_n": 35,
+   "kind": "proposal",
+   "move": {
+    "softmax": "vfu"
+   },
+   "why": "Halve KV precision to 4 bits is not an option, so test the closest legal lever: kv_bits 16 vs 8 is already at 8, so instead try softmax on vfu with vector on star to shift softmax off the saturated star unit and balance load.",
+   "agent": "nonlinear",
+   "outcome": "slower",
+   "time_s": 14514.495691664706,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 0.2606023428091793
+  },
+  {
+   "eval_n": 36,
+   "kind": "proposal",
+   "move": {
+    "vector": "vfu"
+   },
+   "why": "Move vector ops to vfu while softmax stays on star to see whether elementwise time drops by splitting units between the two engines.",
+   "agent": "nonlinear",
+   "outcome": "slower",
+   "time_s": 1217.5968415803704,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 3.1065385953466174
+  },
+  {
+   "eval_n": 37,
+   "kind": "proposal",
+   "move": {
+    "xbar_tech": "xbar_isaac"
+   },
+   "why": "Try xbar_isaac with current mapping to check whether the transpose flavor's area cost is limiting the design.",
+   "agent": "nonlinear",
+   "outcome": "slower",
+   "time_s": 470.3093822458991,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 8.042602858311453
+  },
+  {
+   "eval_n": 31,
+   "kind": "proposal",
+   "move": {
+    "lm_head": "cpu"
+   },
+   "why": "Moving lm_head to cpu isolates whether the vocabulary projection's weight MVM/transfer dominates the remaining time.",
+   "agent": "placement",
+   "outcome": "duplicate",
+   "time_s": 2428.438907824572,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 1.557589762605964
+  },
+  {
+   "eval_n": 38,
+   "kind": "proposal",
+   "move": {
+    "mvm": "cpu"
+   },
+   "why": "Running all layer weight MVMs on cpu shows how much time the xbar MVM and its transfers contribute.",
+   "agent": "placement",
+   "outcome": "slower",
+   "time_s": 45110.55753682836,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 0.08384980786046617
+  },
+  {
+   "eval_n": 39,
+   "kind": "proposal",
+   "move": {
+    "link": "package"
+   },
+   "why": "Dropping link to package tests whether coupling transfer time is a significant component versus the die link.",
+   "agent": "placement",
+   "outcome": "slower",
+   "time_s": 399.96044919700546,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 9.457214055878907
+  },
+  {
+   "eval_n": 39,
+   "kind": "proposal",
+   "move": {
+    "edge": "vfu"
+   },
+   "why": "Edge on vfu tests whether embedding/sampling on the CPU is a significant remaining cost, keeping mvm and lm_head on xbar.",
+   "agent": "placement",
+   "outcome": "illegal",
+   "time_s": null,
+   "violations": [
+    [
+     "R1.sampling",
+     "sample",
+     "sample is sampling: it needs the full logits, an RNG and the token on the host; vfu_puma does not list 'sampling'"
+    ],
+    [
+     "R2.transfer",
+     "embed",
+     "embed on vfu_puma: the token must cross in from the host every step (~0.00 us at 1000 GB/s), and the integrator charges no transfer for it"
+    ],
+    [
+     "R2.transfer",
+     "sample",
+     "sample on vfu_puma: the token must cross back to the host every step (~0.05 us at 1000 GB/s), and the integrator charges no transfer for it"
+    ]
+   ],
+   "verify": {
+    "legal": false,
+    "violations": [
+     [
+      "R1.sampling",
+      "sample",
+      "sample is sampling: it needs the full logits, an RNG and the token on the host; vfu_puma does not list 'sampling'"
+     ],
+     [
+      "R2.transfer",
+      "embed",
+      "embed on vfu_puma: the token must cross in from the host every step (~0.00 us at 1000 GB/s), and the integrator charges no transfer for it"
+     ],
+     [
+      "R2.transfer",
+      "sample",
+      "sample on vfu_puma: the token must cross back to the host every step (~0.05 us at 1000 GB/s), and the integrator charges no transfer for it"
+     ]
+    ],
+    "summary": "R1.sampling: sample; R2.transfer: embed (+1)"
+   }
+  },
+  {
+   "eval_n": 40,
+   "kind": "proposal",
+   "move": {
+    "mvm": "cpu",
+    "lm_head": "cpu"
+   },
+   "why": "Move only the lm_head to cpu was a duplicate, so test mvm=cpu with lm_head=cpu and edge=cpu to isolate the placement of all matrix work on CPU.",
+   "agent": "placement",
+   "outcome": "slower",
+   "time_s": 47139.507807728056,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 0.08024079499025775
+  },
+  {
+   "eval_n": 41,
+   "kind": "proposal",
+   "move": {
+    "xbar_tile": "lean",
+    "adc_per_ima": "4"
+   },
+   "why": "Lean tile and 4 ADCs together cut area and effort; test whether time holds on #30.",
+   "agent": "area",
+   "outcome": "slower",
+   "time_s": 504.93691408738346,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 7.491057746843534
+  },
+  {
+   "eval_n": 42,
+   "kind": "proposal",
+   "move": {
+    "xbar_tile": "lean"
+   },
+   "why": "Isolate lean tile alone (no eDRAM buffer) in case the ADC reduction slows reads.",
+   "agent": "area",
+   "outcome": "slower",
+   "time_s": 399.4886369248841,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 9.468383408994905
+  },
+  {
+   "eval_n": 27,
+   "kind": "proposal",
+   "move": {
+    "star_units": "16"
+   },
+   "why": "Requested star_units 128/256 and kv_bits 4 are not in the option lists (64 and 8 are already the extremes), so I'm testing star_units 16 to see if the nonlinear unit is already saturated and 16 is enough.",
+   "agent": "nonlinear",
+   "outcome": "duplicate",
+   "time_s": 444.2297822890091,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 8.514763603761978
+  },
+  {
+   "eval_n": 35,
+   "kind": "proposal",
+   "move": {
+    "softmax": "vfu"
+   },
+   "why": "Moving softmax to the VFU tests whether it beats the fixed-function unit at this workload, since STAR may be bottlenecked on transfers.",
+   "agent": "nonlinear",
+   "outcome": "duplicate",
+   "time_s": 14514.495691664706,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 0.2606023428091793
+  },
+  {
+   "eval_n": 42,
+   "kind": "proposal",
+   "move": {
+    "attention": "vfu"
+   },
+   "why": "Moving attention to the VFU, with KV kept in memory next to a vector unit, is a different attention path from the crossbar.",
+   "agent": "nonlinear",
+   "outcome": "illegal",
+   "time_s": null,
+   "violations": [
+    [
+     "R3.capacity",
+     "vfu_puma",
+     "over capacity from ctx 54296 (pydata__xarray-4094 turn 184); at ctx 65536 needs 4.832e+09 bytes, has 4e+09 (holds kv.K 2.42 GB, kv.V 2.42 GB)"
+    ]
+   ],
+   "verify": {
+    "legal": false,
+    "violations": [
+     [
+      "R3.capacity",
+      "vfu_puma",
+      "over capacity from ctx 54296 (pydata__xarray-4094 turn 184); at ctx 65536 needs 4.832e+09 bytes, has 4e+09 (holds kv.K 2.42 GB, kv.V 2.42 GB)"
+     ]
+    ],
+    "summary": "R3.capacity: vfu_puma"
+   }
+  },
+  {
+   "eval_n": 43,
+   "kind": "proposal",
+   "move": {
+    "kv_bits": "16"
+   },
+   "why": "Halving KV precision is not offered (only 16 or 8), so this reverts to 16 to test KV sensitivity.",
+   "agent": "nonlinear",
+   "outcome": "slower",
+   "time_s": 399.4886369248841,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 9.468383408994905
+  },
+  {
+   "eval_n": 32,
+   "kind": "proposal",
+   "move": {
+    "cell_bits": "4"
+   },
+   "why": "4-bit cells halve arrays, cutting area and effort; with xbar_scale 1.25 held, time should hold or improve.",
+   "agent": "capacity",
+   "outcome": "duplicate",
+   "time_s": 420.29330494074406,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 8.999695064081136
+  },
+  {
+   "eval_n": 33,
+   "kind": "proposal",
+   "move": {
+    "xbar_scale": "1.0"
+   },
+   "why": "Reducing crossbar scale to 1.0 cuts area while keeping capacity for the longest context, testing whether time holds.",
+   "agent": "capacity",
+   "outcome": "duplicate",
+   "time_s": 399.5058015347378,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 9.467976603620523
+  },
+  {
+   "eval_n": 44,
+   "kind": "proposal",
+   "move": {
+    "cell_bits": "4",
+    "xbar_scale": "1.0",
+    "link": "package"
+   },
+   "why": "Combine 4-bit cells with scale 1.0 and a package link to lower area and effort at once.",
+   "agent": "capacity",
+   "outcome": "slower",
+   "time_s": 420.95789135767416,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 8.985486813757543
+  },
+  {
+   "eval_n": 44,
+   "kind": "proposal",
+   "move": {
+    "edge": "vfu"
+   },
+   "why": "Running embedding lookup and sampling on the VFU instead of the CPU may cut per-token edge latency at little cost.",
+   "agent": "capacity",
+   "outcome": "illegal",
+   "time_s": null,
+   "violations": [
+    [
+     "R1.sampling",
+     "sample",
+     "sample is sampling: it needs the full logits, an RNG and the token on the host; vfu_puma does not list 'sampling'"
+    ],
+    [
+     "R2.transfer",
+     "embed",
+     "embed on vfu_puma: the token must cross in from the host every step (~0.00 us at 1000 GB/s), and the integrator charges no transfer for it"
+    ],
+    [
+     "R2.transfer",
+     "sample",
+     "sample on vfu_puma: the token must cross back to the host every step (~0.05 us at 1000 GB/s), and the integrator charges no transfer for it"
+    ]
+   ],
+   "verify": {
+    "legal": false,
+    "violations": [
+     [
+      "R1.sampling",
+      "sample",
+      "sample is sampling: it needs the full logits, an RNG and the token on the host; vfu_puma does not list 'sampling'"
+     ],
+     [
+      "R2.transfer",
+      "embed",
+      "embed on vfu_puma: the token must cross in from the host every step (~0.00 us at 1000 GB/s), and the integrator charges no transfer for it"
+     ],
+     [
+      "R2.transfer",
+      "sample",
+      "sample on vfu_puma: the token must cross back to the host every step (~0.05 us at 1000 GB/s), and the integrator charges no transfer for it"
+     ]
+    ],
+    "summary": "R1.sampling: sample; R2.transfer: embed (+1)"
+   }
+  },
+  {
+   "eval_n": 44,
+   "kind": "proposal",
+   "move": {
+    "cell_bits": "4",
+    "xbar_scale": "0.75"
+   },
+   "why": "cell_bits 4 halves the arrays, so xbar_scale 0.75 should cut area and effort further. The package link was the slow part of the earlier combo, so this keeps the die link.",
+   "agent": "capacity",
+   "outcome": "illegal",
+   "time_s": null,
+   "violations": [
+    [
+     "R3.capacity",
+     "xbar_transpose",
+     "over capacity from ctx 35531 (pydata__xarray-4094 turn 128); at ctx 65536 needs 1.081e+06 arrays, has 8.106e+05 (holds kv.K 2.42 GB, kv.V 2.42 GB, lm_head 0.39 GB, w.down_proj 0.90 GB, w.gate_proj 0.90 GB, w.k_proj 0.09 GB, w.o_proj 0.38 GB, w.q_proj 0.38 GB, w.up_proj 0.90 GB, w.v_proj 0.09 GB)"
+    ]
+   ],
+   "verify": {
+    "legal": false,
+    "violations": [
+     [
+      "R3.capacity",
+      "xbar_transpose",
+      "over capacity from ctx 35531 (pydata__xarray-4094 turn 128); at ctx 65536 needs 1.081e+06 arrays, has 8.106e+05 (holds kv.K 2.42 GB, kv.V 2.42 GB, lm_head 0.39 GB, w.down_proj 0.90 GB, w.gate_proj 0.90 GB, w.k_proj 0.09 GB, w.o_proj 0.38 GB, w.q_proj 0.38 GB, w.up_proj 0.90 GB, w.v_proj 0.09 GB)"
+     ]
+    ],
+    "summary": "R3.capacity: xbar_transpose"
+   }
+  },
+  {
+   "eval_n": 45,
+   "kind": "proposal",
+   "move": {
+    "adc_per_ima": "4"
+   },
+   "why": "adc_per_ima 4 shrinks tile area, and reads may not be the bottleneck, so time could hold.",
+   "agent": "capacity",
+   "outcome": "slower",
+   "time_s": 504.93691408738346,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 7.491057746843534
+  },
+  {
+   "eval_n": 30,
+   "kind": "proposal",
+   "move": {
+    "vfu_units": "4"
+   },
+   "why": "Doubling star units to 128 is not an available option (max 64), so star_units 64 is already the top; instead try moving to kv_bits 4 is also not offered\u2014so the only remaining legal single-knob test is vfu_units 4 for any residual vfu work.",
+   "agent": "nonlinear",
+   "outcome": "duplicate",
+   "time_s": 399.4886369248841,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 9.468383408994905
+  },
+  {
+   "eval_n": 31,
+   "kind": "proposal",
+   "move": {
+    "lm_head": "cpu"
+   },
+   "why": "Die coupling is already current, so the untested option is moving lm_head to cpu to test whether the vocabulary projection is better off there.",
+   "agent": "placement",
+   "outcome": "duplicate",
+   "time_s": 2428.438907824572,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 1.557589762605964
+  },
+  {
+   "eval_n": 38,
+   "kind": "proposal",
+   "move": {
+    "mvm": "cpu"
+   },
+   "why": "Moving the weight MVMs to cpu is an untested placement and gives a baseline that shows whether xbar is really the bottleneck.",
+   "agent": "placement",
+   "outcome": "duplicate",
+   "time_s": 45110.55753682836,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 0.08384980786046617
+  },
+  {
+   "eval_n": 39,
+   "kind": "proposal",
+   "move": {
+    "link": "package"
+   },
+   "why": "Dropping the link to package is untested on its own, and it checks how sensitive the time is to coupling.",
+   "agent": "placement",
+   "outcome": "duplicate",
+   "time_s": 399.96044919700546,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 9.457214055878907
+  },
+  {
+   "eval_n": 37,
+   "kind": "proposal",
+   "move": {
+    "xbar_tech": "xbar_isaac"
+   },
+   "why": "More fixed-function nonlinear units (64 is the max listed, so 128 is not an option; instead cut KV traffic) \u2014 kv_bits 4 is not available, so try the only remaining distinct knob: vfu_units is unused, thus switch KV precision to 16 is worse; best remaining is xbar_tech xbar_isaac to test whether the ",
+   "agent": "nonlinear",
+   "outcome": "duplicate",
+   "time_s": 470.3093822458991,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 8.042602858311453
+  },
+  {
+   "eval_n": 27,
+   "kind": "proposal",
+   "move": {
+    "star_units": "16"
+   },
+   "why": "Star_units 64 is the max option, so try 256 isn't available; instead raise VFU bandwidth is moot with attention on xbar, so first try star_units 16 to check whether fewer units give area/time parity.",
+   "agent": "nonlinear",
+   "outcome": "duplicate",
+   "time_s": 444.2297822890091,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 8.514763603761978
+  },
+  {
+   "eval_n": 30,
+   "kind": "proposal",
+   "move": {
+    "vfu_bw": "256000000000.0"
+   },
+   "why": "Increase KV memory bandwidth to 256 GB/s to cut any residual KV time handled by the vector-unit path.",
+   "agent": "nonlinear",
+   "outcome": "duplicate",
+   "time_s": 399.4886369248841,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 9.468383408994905
+  },
+  {
+   "eval_n": 30,
+   "kind": "proposal",
+   "move": {
+    "vfu_mem": "16000000000.0"
+   },
+   "why": "Increase VFU capacity to 16 GB so more KV fits near the vector unit, one knob changed.",
+   "agent": "nonlinear",
+   "outcome": "duplicate",
+   "time_s": 399.4886369248841,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 9.468383408994905
+  },
+  {
+   "eval_n": 45,
+   "kind": "proposal",
+   "move": {
+    "edge": "vfu"
+   },
+   "why": "The only untested single knob is edge=vfu, which moves embedding and sampling off the CPU while keeping link=die, lm_head=xbar and mvm=xbar, since the lm_head=cpu and mvm=cpu moves were already tried and were far slower.",
+   "agent": "placement",
+   "outcome": "illegal",
+   "time_s": null,
+   "violations": [
+    [
+     "R1.sampling",
+     "sample",
+     "sample is sampling: it needs the full logits, an RNG and the token on the host; vfu_puma does not list 'sampling'"
+    ],
+    [
+     "R2.transfer",
+     "embed",
+     "embed on vfu_puma: the token must cross in from the host every step (~0.00 us at 1000 GB/s), and the integrator charges no transfer for it"
+    ],
+    [
+     "R2.transfer",
+     "sample",
+     "sample on vfu_puma: the token must cross back to the host every step (~0.05 us at 1000 GB/s), and the integrator charges no transfer for it"
+    ]
+   ],
+   "verify": {
+    "legal": false,
+    "violations": [
+     [
+      "R1.sampling",
+      "sample",
+      "sample is sampling: it needs the full logits, an RNG and the token on the host; vfu_puma does not list 'sampling'"
+     ],
+     [
+      "R2.transfer",
+      "embed",
+      "embed on vfu_puma: the token must cross in from the host every step (~0.00 us at 1000 GB/s), and the integrator charges no transfer for it"
+     ],
+     [
+      "R2.transfer",
+      "sample",
+      "sample on vfu_puma: the token must cross back to the host every step (~0.05 us at 1000 GB/s), and the integrator charges no transfer for it"
+     ]
+    ],
+    "summary": "R1.sampling: sample; R2.transfer: embed (+1)"
+   }
+  },
+  {
+   "eval_n": 46,
+   "kind": "proposal",
+   "move": {
+    "xbar_tile": "lean",
+    "cell_bits": "4",
+    "xbar_scale": "1.0"
+   },
+   "why": "Lean tile with cell_bits 4 cuts area greatly (half arrays, no eDRAM) while keeping the time near 399.5 s.",
+   "agent": "capacity",
+   "outcome": "slower",
+   "time_s": 420.4860790855528,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 8.995569104612297
+  },
+  {
+   "eval_n": 47,
+   "kind": "proposal",
+   "move": {
+    "xbar_scale": "1.5"
+   },
+   "why": "Raising xbar_scale to 1.5 tests whether more arrays (more replication/parallelism) lowers time.",
+   "agent": "capacity",
+   "outcome": "slower",
+   "time_s": 399.4886369248841,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 9.468383408994905
+  },
+  {
+   "eval_n": 48,
+   "kind": "proposal",
+   "move": {
+    "adc_per_ima": "4",
+    "xbar_scale": "1.0"
+   },
+   "why": "Fewer ADCs per IMA (4) trims area at modest read slowdown, probing the area/time tradeoff.",
+   "agent": "capacity",
+   "outcome": "slower",
+   "time_s": 504.95407869723726,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 7.4908031076812
+  },
+  {
+   "eval_n": 48,
+   "kind": "proposal",
+   "move": {
+    "attention": "vfu",
+    "vfu_units": "64"
+   },
+   "why": "star_units 128/256 and kv_bits 4 aren't legal options, so I'm testing attention=vfu with 64 lanes, since 1 lane would bottleneck it (this changes two knobs, but attention=vfu alone is pointless).",
+   "agent": "nonlinear",
+   "outcome": "illegal",
+   "time_s": null,
+   "violations": [
+    [
+     "R3.capacity",
+     "vfu_puma",
+     "over capacity from ctx 54296 (pydata__xarray-4094 turn 184); at ctx 65536 needs 4.832e+09 bytes, has 4e+09 (holds kv.K 2.42 GB, kv.V 2.42 GB)"
+    ]
+   ],
+   "verify": {
+    "legal": false,
+    "violations": [
+     [
+      "R3.capacity",
+      "vfu_puma",
+      "over capacity from ctx 54296 (pydata__xarray-4094 turn 184); at ctx 65536 needs 4.832e+09 bytes, has 4e+09 (holds kv.K 2.42 GB, kv.V 2.42 GB)"
+     ]
+    ],
+    "summary": "R3.capacity: vfu_puma"
+   }
+  },
+  {
+   "eval_n": 48,
+   "kind": "proposal",
+   "move": {
+    "attention": "vfu",
+    "vfu_units": "256",
+    "vfu_bw": "1000000000000.0"
+   },
+   "why": "Same attention=vfu variant with 256 lanes and 1 TB/s KV bandwidth, to see whether the vector-unit path can beat the crossbar when it isn't compute or bandwidth bound.",
+   "agent": "nonlinear",
+   "outcome": "illegal",
+   "time_s": null,
+   "violations": [
+    [
+     "R3.capacity",
+     "vfu_puma",
+     "over capacity from ctx 54296 (pydata__xarray-4094 turn 184); at ctx 65536 needs 4.832e+09 bytes, has 4e+09 (holds kv.K 2.42 GB, kv.V 2.42 GB)"
+    ]
+   ],
+   "verify": {
+    "legal": false,
+    "violations": [
+     [
+      "R3.capacity",
+      "vfu_puma",
+      "over capacity from ctx 54296 (pydata__xarray-4094 turn 184); at ctx 65536 needs 4.832e+09 bytes, has 4e+09 (holds kv.K 2.42 GB, kv.V 2.42 GB)"
+     ]
+    ],
+    "summary": "R3.capacity: vfu_puma"
+   }
+  },
+  {
+   "eval_n": 34,
+   "kind": "proposal",
+   "move": {
+    "attention": "vfu",
+    "vfu_mem": "16000000000.0",
+    "vfu_units": "256",
+    "vfu_bw": "1000000000000.0"
+   },
+   "why": "star_units 128/256 and kv_bits 4 are not in the option lists, so the legal route is attention=vfu with vfu_mem raised to 16 GB, which fixes the R3 capacity violation (needs 4.8 GB). I'm using max lanes and bandwidth to make decode attention fast.",
+   "agent": "nonlinear",
+   "outcome": "duplicate",
+   "time_s": 5979.934722364109,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 0.6325339251272266
+  },
+  {
+   "eval_n": 49,
+   "kind": "proposal",
+   "move": {
+    "attention": "vfu",
+    "vfu_mem": "16000000000.0",
+    "vfu_units": "64",
+    "vfu_bw": "256000000000.0"
+   },
+   "why": "This is the same legal vfu configuration with a middle-sized vector unit and bandwidth, in case the maximum configuration costs too much area or time.",
+   "agent": "nonlinear",
+   "outcome": "slower",
+   "time_s": 22934.631628537038,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 0.16492576132049444
+  },
+  {
+   "eval_n": 27,
+   "kind": "proposal",
+   "move": {
+    "star_units": "16"
+   },
+   "why": "The requested star_units 128/256 and kv_bits 4 aren't in the option lists, so I'm trying the nearest legal change: 16 star units frees area and may be enough for softmax and vector ops.",
+   "agent": "nonlinear",
+   "outcome": "duplicate",
+   "time_s": 444.2297822890091,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 8.514763603761978
+  },
+  {
+   "eval_n": 43,
+   "kind": "proposal",
+   "move": {
+    "kv_bits": "16"
+   },
+   "why": "Attention=vfu variants were illegal or far slower, so I'm testing 16-bit KV with xbar, which is a different single-knob change that skips quantization overhead.",
+   "agent": "nonlinear",
+   "outcome": "duplicate",
+   "time_s": 399.4886369248841,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 9.468383408994905
+  },
+  {
+   "eval_n": 31,
+   "kind": "proposal",
+   "move": {
+    "lm_head": "cpu"
+   },
+   "why": "Moving only the vocabulary projection to the CPU (keeping edge on cpu, MVMs on xbar) is a legal single-knob change that may cut xbar capacity pressure and lm_head time.",
+   "agent": "placement",
+   "outcome": "duplicate",
+   "time_s": 2428.438907824572,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 1.557589762605964
+  },
+  {
+   "eval_n": 39,
+   "kind": "proposal",
+   "move": {
+    "link": "package"
+   },
+   "why": "Moving link from die to package changes only the coupling, which could help if the die link is a cost, and is a legal single-knob change.",
+   "agent": "placement",
+   "outcome": "duplicate",
+   "time_s": 399.96044919700546,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 9.457214055878907
+  },
+  {
+   "eval_n": 38,
+   "kind": "proposal",
+   "move": {
+    "mvm": "cpu"
+   },
+   "why": "Moving the 7 layer MVMs to the CPU is a legal placement variant that tests whether the xbar is the bottleneck.",
+   "agent": "placement",
+   "outcome": "duplicate",
+   "time_s": 45110.55753682836,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 0.08384980786046617
+  },
+  {
+   "eval_n": 37,
+   "kind": "proposal",
+   "move": {
+    "xbar_tech": "xbar_isaac"
+   },
+   "why": "128/256 star_units are not legal options (max 64), so switch xbar_tech to xbar_isaac to test whether dropping the transpose crossbar's area overhead helps.",
+   "agent": "nonlinear",
+   "outcome": "duplicate",
+   "time_s": 470.3093822458991,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 8.042602858311453
+  },
+  {
+   "eval_n": 50,
+   "kind": "proposal",
+   "move": {
+    "link": "cxl"
+   },
+   "why": "The only legal single-knob change not yet tried is link=cxl, since edge=vfu is illegal and the mvm=cpu, lm_head=cpu and link=package moves were already evaluated.",
+   "agent": "placement",
+   "outcome": "slower",
+   "time_s": 401.68198714139606,
+   "violations": null,
+   "verify": {
+    "legal": true,
+    "violations": [],
+    "summary": "legal"
+   },
+   "speedup": 9.416682109297772
+  }
+ ],
+ "final": {
+  "point": {
+   "mvm": "xbar",
+   "lm_head": "xbar",
+   "attention": "xbar",
+   "xbar_tech": "xbar_transpose",
+   "softmax": "star",
+   "vector": "star",
+   "edge": "cpu",
+   "xbar_scale": 1.25,
+   "vfu_units": 1,
+   "vfu_bw": 64000000000.0,
+   "vfu_mem": 4000000000.0,
+   "star_units": 64,
+   "link": "die",
+   "kv_bits": 8,
+   "xbar_tile": "lean",
+   "adc_per_ima": 8,
+   "cell_bits": 2
+  },
+  "n": 42,
+  "time_s": 399.4886369248841,
+  "llm_s": 172.47240398332247,
+  "tools_s": 227.0162329415616,
+  "speedup": 9.468383408994905,
+  "feasible": true,
+  "reason": "",
+  "area_mm2": 7291.212708333332,
+  "effort_months": 18.0,
+  "terms": {
+   "host": 2.1203575386760414,
+   "launch": 0.0290614390625,
+   "transfer": 48.12534070105213,
+   "softmax_star": 15.081690239156238,
+   "xbar_transpose": 106.00066673748555,
+   "write": 1.1152873278899993
+  }
+ },
+ "metrics": {
+  "evals": 50,
+  "budget": 50,
+  "proposals": 84,
+  "illegal": 14,
+  "illegal_rules": {
+   "R1.sampling": 9,
+   "R2.transfer": 9,
+   "R3.capacity": 5
+  },
+  "best_speedup": 9.468383408994905,
+  "best_eval": 30,
+  "pick_speedup": 9.468383408994905,
+  "pick_area_mm2": 7291.212708333332,
+  "pick_effort_months": 18.0,
+  "first_1pct_eval": 30,
+  "gap_certificate": 0.1436535759864086,
+  "gap_dp": null,
+  "certificate_s": 349.3091311154451,
+  "wall_s": 355.2403063774109,
+  "eval_wall_s": 1.0806872844696045,
+  "tokens_in": 301738,
+  "tokens_out": 24057,
+  "tokens": {
+   "claude-sonnet-5-5": {
+    "in": 301738,
+    "out": 24057
+   }
+  },
+  "stop": "supervisor stopped",
+  "best@10": 0.5239984832282634,
+  "best@20": 3.2659850250029008,
+  "best@30": 9.468383408994905,
+  "best@50": 9.468383408994905,
+  "curve": [
+   [
+    1,
+    0.04030541329099843
+   ],
+   [
+    2,
+    0.04119508885651687
+   ],
+   [
+    3,
+    0.1545797974064245
+   ],
+   [
+    4,
+    0.15541169971156632
+   ],
+   [
+    9,
+    0.15618426338667754
+   ],
+   [
+    10,
+    0.5239984832282634
+   ],
+   [
+    11,
+    0.6325786633834296
+   ],
+   [
+    18,
+    3.2659850250029008
+   ],
+   [
+    24,
+    7.462431959795746
+   ],
+   [
+    27,
+    8.514763603761978
+   ],
+   [
+    30,
+    9.468383408994905
+   ]
+  ],
+  "method": "eat_sonnet",
+  "seed": 0
+ },
+ "extra": {
+  "model_id": "claude-sonnet-5-5",
+  "llm_calls": 58,
+  "teams": [
+   {
+    "eval_n": 1,
+    "reason": "start of the run",
+    "why": "Baseline is 93846s (all on CPU presumably). Need to move compute to PIM first: mvm/lm_head placement is the dominant lever, then attention/softmax/vector placement, then hardware sizing and link.",
+    "team": [
+     {
+      "name": "placer",
+      "brief": "Move the weight MVMs and lm_head onto the PIM crossbars, since they dominate decode time, then tune cell_bits and xbar_scale for feasibility.",
+      "families": [
+       "cell_bits",
+       "lm_head",
+       "mvm",
+       "xbar_scale"
+      ]
+     },
+     {
+      "name": "attn",
+      "brief": "Move attention, softmax and KV handling into PIM (xbar or vfu) and size the supporting units and KV precision.",
+      "families": [
+       "attention",
+       "kv_bits",
+       "softmax",
+       "star_units",
+       "vfu_bw",
+       "vfu_mem",
+       "vfu_units",
+       "xbar_tech"
+      ]
+     },
+     {
+      "name": "rest",
+      "brief": "Offload vector ops and edge ops to PIM and upgrade the link to cut transfer overhead.",
+      "families": [
+       "edge",
+       "link",
+       "vector"
+      ]
+     },
+     {
+      "name": "area",
+      "brief": "Trim tile area with lean tiles and fewer ADCs once the design is feasible, trading area against time.",
+      "families": [
+       "adc_per_ima",
+       "xbar_tile"
+      ]
+     }
+    ]
+   },
+   {
+    "eval_n": 17,
+    "reason": "no accepted move in the last 6 proposals",
+    "why": "No worker has tried moving the weight MVMs (mvm) onto PIM, the biggest untested lever. Attention on xbar with transpose is also untested. Area and capacity knobs only matter once mvm moves, so they are merged into one worker.",
+    "team": [
+     {
+      "name": "placer",
+      "brief": "Move the 7 per-layer weight MVMs to xbar (keeping lm_head on xbar) on top of the best design, as this is the largest untried lever for decode time.",
+      "families": [
+       "lm_head",
+       "mvm"
+      ]
+     },
+     {
+      "name": "attn",
+      "brief": "Try attention on xbar with xbar_transpose, and tune kv_bits, vfu_units, vfu_bw, vfu_mem, softmax and star_units to cut attention time below the vfu design.",
+      "families": [
+       "attention",
+       "kv_bits",
+       "softmax",
+       "star_units",
+       "vfu_bw",
+       "vfu_mem",
+       "vfu_units",
+       "xbar_tech"
+      ]
+     },
+     {
+      "name": "rest",
+      "brief": "Keep the die link and vfu vector ops, and look for a legal way to offload the edge ops (embedding and sampling) without breaking the transfer and sampling rules.",
+      "families": [
+       "edge",
+       "link",
+       "vector"
+      ]
+     },
+     {
+      "name": "capacity",
+      "brief": "After mvm moves, fix any capacity infeasibility with cell_bits 4 and xbar_scale, then trim area with lean tiles and fewer ADCs only where time is unaffected.",
+      "families": [
+       "adc_per_ima",
+       "cell_bits",
+       "xbar_scale",
+       "xbar_tile"
+      ]
+     }
+    ]
+   },
+   {
+    "eval_n": 23,
+    "reason": "no accepted move in the last 6 proposals",
+    "why": "Best is #18 (1158 s). Attention-on-xbar was the big win. Remaining time is likely in softmax, vector ops, edge/link transfers and the MVMs. Area-trimming moves can't make it faster, so I'm merging the area workers into one that tests only whether more capacity or ADC speeds things up. The placer is ",
+    "team": [
+     {
+      "name": "attn",
+      "brief": "On top of #18, move softmax to star with star_units 2-8, and try kv_bits 4 and larger vfu_units to cut attention and softmax time.",
+      "families": [
+       "attention",
+       "kv_bits",
+       "softmax",
+       "star_units",
+       "vfu_bw",
+       "vfu_mem",
+       "vfu_units",
+       "xbar_tech"
+      ]
+     },
+     {
+      "name": "placer",
+      "brief": "On top of #18, check whether mvm placement variants (for example xbar versus other legal targets) and the lm_head placement lower time, and check which of the two dominates the remaining time.",
+      "families": [
+       "lm_head",
+       "mvm"
+      ]
+     },
+     {
+      "name": "rest",
+      "brief": "Test vector placement variants and the link level, and try legal edge placements, to cut transfer and elementwise overhead.",
+      "families": [
+       "edge",
+       "link",
+       "vector"
+      ]
+     },
+     {
+      "name": "capacity",
+      "brief": "Test whether speed-oriented settings (xbar_scale above 1, more ADCs per IMA, cell_bits 4) cut time on #18; skip pure area trims.",
+      "families": [
+       "adc_per_ima",
+       "cell_bits",
+       "xbar_scale",
+       "xbar_tile"
+      ]
+     }
+    ]
+   },
+   {
+    "eval_n": 34,
+    "reason": "no accepted move in the last 6 proposals",
+    "why": "Best is #30 at 399.5 s (9.47x GPU). The remaining time is likely dominated by something we haven't probed: star_units at 64 helped, so the nonlinear unit may still bind. Capacity and placement moves have saturated, so I'm dropping capacity and placer. I'm merging the attention, softmax and vector kn",
+    "team": [
+     {
+      "name": "nonlinear",
+      "brief": "Starting from #30, push star_units beyond 64 (128, 256) and try softmax/vector/attention combinations plus kv_bits 4 to cut the remaining softmax and elementwise time.",
+      "families": [
+       "attention",
+       "kv_bits",
+       "softmax",
+       "star_units",
+       "vector",
+       "xbar_tech"
+      ]
+     },
+     {
+      "name": "placement",
+      "brief": "Starting from #30, test the mvm placement variants other than cpu and the edge and link placements to find which transfer or weight-MVM component dominates the remaining time.",
+      "families": [
+       "edge",
+       "link",
+       "lm_head",
+       "mvm"
+      ]
+     },
+     {
+      "name": "vfu",
+      "brief": "Explore the vfu_units, vfu_bw and vfu_mem scaling in combination with the xbar attention to see if a hybrid offload lowers the attention time.",
+      "families": [
+       "vfu_bw",
+       "vfu_mem",
+       "vfu_units"
+      ]
+     },
+     {
+      "name": "capacity",
+      "brief": "Try xbar_tile lean and adc_per_ima increases (4, 8) only if they cut time on #30; otherwise leave the area knobs alone.",
+      "families": [
+       "adc_per_ima",
+       "cell_bits",
+       "xbar_scale",
+       "xbar_tile"
+      ]
+     }
+    ]
+   },
+   {
+    "eval_n": 39,
+    "reason": "no accepted move in the last 6 proposals",
+    "why": "Best is #30 at 399.5 s (9.47x). Most single-knob moves were tried and failed. The remaining time is probably the weight MVMs and the lm_head on xbar, which tools can't reduce below 227 s. Unexplored knobs are kv_bits 4, star_units 128 or more, lean tiles, ADC counts, and mvm variants other than cpu.",
+    "team": [
+     {
+      "name": "nonlinear",
+      "brief": "Starting from #30, try star_units 128/256 and kv_bits 4 (one change per proposal) to cut remaining softmax and elementwise time.",
+      "families": [
+       "attention",
+       "kv_bits",
+       "softmax",
+       "star_units",
+       "vector",
+       "xbar_tech"
+      ]
+     },
+     {
+      "name": "placement",
+      "brief": "Starting from #30, test the non-cpu mvm placement variants and the edge placement (avoid vfu) to find which component dominates remaining time.",
+      "families": [
+       "edge",
+       "link",
+       "lm_head",
+       "mvm"
+      ]
+     },
+     {
+      "name": "area",
+      "brief": "Try xbar_tile lean and adc_per_ima 4 on #30 to see whether time holds while area and effort fall; leave them alone if they slow it down.",
+      "families": [
+       "adc_per_ima",
+       "cell_bits",
+       "xbar_scale",
+       "xbar_tile"
+      ]
+     }
+    ]
+   },
+   {
+    "eval_n": 42,
+    "reason": "no accepted move in the last 8 proposals",
+    "why": "Best is 399.5 s on #30. Placement, link, tile and ADC variants have all been tried and none beat it. The untried knobs that could still cut time are star_units 128/256, kv_bits 4 and cell_bits 4. With 8 evaluations left, I'm using two focused workers and dropping the placement worker, whose families",
+    "team": [
+     {
+      "name": "nonlinear",
+      "brief": "From #30, change one knob per proposal: star_units 128 or 256, then kv_bits 4, to cut the remaining softmax, elementwise and KV time. Skip anything already tried.",
+      "families": [
+       "attention",
+       "kv_bits",
+       "softmax",
+       "star_units",
+       "vector",
+       "vfu_bw",
+       "vfu_mem",
+       "vfu_units",
+       "xbar_tech"
+      ]
+     },
+     {
+      "name": "capacity",
+      "brief": "From #30, try cell_bits 4 and xbar_scale variants, plus edge or link tweaks, to see whether time drops or holds while area and effort fall. Skip anything already tried.",
+      "families": [
+       "adc_per_ima",
+       "cell_bits",
+       "edge",
+       "link",
+       "xbar_scale",
+       "xbar_tile"
+      ]
+     }
+    ]
+   },
+   {
+    "eval_n": 45,
+    "reason": "no accepted move in the last 8 proposals",
+    "why": "Time is stuck at 399.5 s. Area and effort knobs (tile, ADC, cell_bits, scale) only trade area or slow the design down, so I'm dropping that worker. The remaining untried time levers are nonlinear throughput and the placement of the main compute.",
+    "team": [
+     {
+      "name": "nonlinear",
+      "brief": "From #30, change one knob per proposal: star_units 128 or 256, then kv_bits 4, to cut the remaining softmax, elementwise and KV time. Skip anything already tried.",
+      "families": [
+       "attention",
+       "kv_bits",
+       "softmax",
+       "star_units",
+       "vector",
+       "vfu_bw",
+       "vfu_mem",
+       "vfu_units",
+       "xbar_tech"
+      ]
+     },
+     {
+      "name": "placement",
+      "brief": "From #30, try untested placements and links that could cut the remaining time: edge, mvm and lm_head variants that are legal, and the link. Skip anything already tried.",
+      "families": [
+       "edge",
+       "link",
+       "lm_head",
+       "mvm"
+      ]
+     }
+    ]
+   },
+   {
+    "eval_n": 45,
+    "reason": "no accepted move in the last 6 proposals",
+    "why": "Best is 399.5s (9.47x) at #30. The 227 s tool floor leaves about 172 s of headroom. Placement and capacity knobs are largely exhausted. The remaining gains are in the nonlinear and KV paths. So I'm keeping a nonlinear worker with a narrower brief and merging in the unexplored vfu knobs. I'm adding a",
+    "team": [
+     {
+      "name": "nonlinear",
+      "brief": "From #30, try star_units 128 or 256 and then vfu_bw/vfu_mem variants, changing one knob at a time and skipping anything already tried, to cut the remaining softmax, elementwise and KV time.",
+      "families": [
+       "attention",
+       "kv_bits",
+       "softmax",
+       "star_units",
+       "vector",
+       "vfu_bw",
+       "vfu_mem",
+       "vfu_units",
+       "xbar_tech"
+      ]
+     },
+     {
+      "name": "placement",
+      "brief": "From #30, try link=die with the untested edge, mvm and lm_head combinations that are legal, and skip anything already tried or illegal.",
+      "families": [
+       "edge",
+       "link",
+       "lm_head",
+       "mvm"
+      ]
+     },
+     {
+      "name": "capacity",
+      "brief": "From #30, try xbar_scale values above 1.0, lean tile with cell_bits 4, and other area/effort cuts that keep the time near 399.5 s.",
+      "families": [
+       "adc_per_ima",
+       "cell_bits",
+       "xbar_scale",
+       "xbar_tile"
+      ]
+     }
+    ]
+   },
+   {
+    "eval_n": 48,
+    "reason": "no accepted move in the last 7 proposals",
+    "why": "Placement and capacity families are exhausted (all legal or useful moves tried, only slower or equal results). The remaining untested headroom is in the nonlinear and KV knobs, so I'm keeping one focused worker on them.",
+    "team": [
+     {
+      "name": "nonlinear",
+      "brief": "From #30, try untested star_units 128 then 256, then larger vfu_units or kv_bits 4 and attention=vfu variants, changing one knob at a time and skipping any duplicates.",
+      "families": [
+       "attention",
+       "kv_bits",
+       "softmax",
+       "star_units",
+       "vector",
+       "vfu_bw",
+       "vfu_mem",
+       "vfu_units",
+       "xbar_tech"
+      ]
+     }
+    ]
+   },
+   {
+    "eval_n": 49,
+    "reason": "no accepted move in the last 6 proposals",
+    "why": "Capacity and KV-precision knobs are exhausted and the vfu attention variants are far slower. The one untested lever near the best design is more nonlinear throughput, so star_units goes to 128. A second worker covers the placement of the remaining non-MVM work.",
+    "team": [
+     {
+      "name": "nonlinear",
+      "brief": "From #30, change only star_units to 128 (then 256 if it helps), since 16 was slower and 64 is the current best; skip any duplicates.",
+      "families": [
+       "softmax",
+       "star_units",
+       "vector",
+       "xbar_tech"
+      ]
+     },
+     {
+      "name": "placement",
+      "brief": "From #30, try legal placements of the remaining non-MVM work, such as edge on cpu or xbar and mvm variants, one knob at a time, avoiding the vfu edge placement that was illegal.",
+      "families": [
+       "edge",
+       "link",
+       "lm_head",
+       "mvm"
+      ]
+     }
+    ]
+   },
+   {
+    "eval_n": 50,
+    "reason": "no accepted move in the last 6 proposals",
+    "why": "No evaluations remain. The best design (#30) is at 399.5 s (9.47x GPU). Many variants tie it exactly (#42, #43, #47), and link, cell_bits and ADC changes are equal or slower. The remaining untried ideas are star_units 128 and edge placement, and neither can be evaluated now.",
+    "team": [
+     {
+      "name": "nonlinear",
+      "brief": "Try star_units 128 and then 256 from #30, skipping duplicates.",
+      "families": [
+       "softmax",
+       "star_units",
+       "vector",
+       "xbar_tech"
+      ]
+     },
+     {
+      "name": "placement",
+      "brief": "Try edge on cpu or xbar from #30, changing one knob at a time.",
+      "families": [
+       "edge",
+       "link",
+       "lm_head",
+       "mvm"
+      ]
+     }
+    ]
+   }
+  ]
+ }
+}
