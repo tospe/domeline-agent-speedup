@@ -108,7 +108,10 @@ def _cap_job(args):
         nonlocal best
         e = fe(point)
         ok = e.feasible and e.wall_ctx is None and e.area_mm2 <= area_cap + 1e-9 and e.effort_months <= effort_cap + 1e-9
-        if ok and (best is None or e.time_s < best[0]):
+        # Faster wins; at equal time (1e-12 rel) the smaller area, then the smaller effort.
+        better = best is None or e.time_s < best[0] * (1 - 1e-12) or (
+            e.time_s <= best[0] * (1 + 1e-12) and (e.area_mm2, e.effort_months) < (best[2]["area_mm2"], best[2]["effort_months"]))
+        if ok and better:
             if verifier(point)["legal"]:
                 best = (e.time_s, dict(point), {"how": how, "speedup": e.speedup_vs_gpu, "area_mm2": e.area_mm2,
                                                 "effort_months": e.effort_months, "llm_s": e.llm_s})
@@ -128,13 +131,13 @@ def _cap_job(args):
                 fits.append((v.llm_s, v, u, tile, scale))
     fits.sort(key=lambda f: f[0])
     seen = set()
-    for t, v, u, tile, scale in fits[:20]:
+    for t, v, u, tile, scale in fits[:200]:
         k = (id(u), v.lam, tile, scale)
         if k in seen:
             continue
         seen.add(k)
         consider(point_at(u, v.lam, tile, scale), "vertex")
-        if best and t + tools >= best[0]:
+        if best and t + tools > best[0] * (1 + 1e-12):
             break
     # Branch and bound over settings: mix the vertices that bracket the cap.
     refined = 0
@@ -194,6 +197,8 @@ def main():
     ap.add_argument("--caps-only", action="store_true")
     ap.add_argument("--allow-edge-vfu", action="store_true")
     ap.add_argument("--max-refine", type=int, default=400)
+    ap.add_argument("--plain-only", action="store_true",
+                    help="caps from hulls without attention on the vector unit (output tag <tag>_plain)")
     args = ap.parse_args()
     exclude = {} if args.allow_edge_vfu else DEFAULT_EXCLUDE
     hp = ROOT / f"results/large/dp_caps_hulls_{args.tag}.json"
@@ -217,17 +222,21 @@ def main():
                                   "seconds": time.time() - t0, "units": units}))
         print(f"hulls done in {time.time() - t0:.0f} s", flush=True)
     units = json.loads(hp.read_text())["units"]
+    tag = args.tag
+    if args.plain_only:           # vfu_bw applies to every VFU op iff some attention is on the VFU
+        units = [u for u in units if u["which"] == "plain"]
+        tag = f"{args.tag}_plain"
     caps = [(a, e, units, exclude, args.max_refine) for a in AREA_CAPS for e in EFFORT_CAPS]
     with mp.Pool(min(args.workers, len(caps))) as pool:
         res = pool.map(_cap_job, caps)
     W = _env(exclude)
     fe = W["fe"]
     floor = min(v["llm_s"] for u in units for v in u["vertices"]) + fe.tools_time
-    out = {"tag": args.tag, "exclude": {k: sorted(v) for k, v in exclude.items()}, "n_settings": len(units),
+    out = {"tag": tag, "plain_only": args.plain_only, "exclude": {k: sorted(v) for k, v in exclude.items()}, "n_settings": len(units),
            "hull_seconds_total": sum(u["seconds"] for u in units),
            "dp_floor_s": floor, "dp_floor_speedup": fe.gpu_time / floor, "tools_s": fe.tools_time,
            "gpu_s": fe.gpu_time, "caps": res, "wall_s": time.time() - t0}
-    (ROOT / f"results/large/dp_caps_{args.tag}.json").write_text(json.dumps(out, indent=1, default=str))
+    (ROOT / f"results/large/dp_caps_{tag}.json").write_text(json.dumps(out, indent=1, default=str))
     print("dp floor", floor, fe.gpu_time / floor)
 
 
