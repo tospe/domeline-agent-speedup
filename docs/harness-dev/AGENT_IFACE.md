@@ -73,3 +73,81 @@ are asked too, in this order):
 | star (softmax unit term) | hardware |
 | xbar (crossbar term) | hardware, mapping |
 | unit (any other tech) | capacity, hardware |
+
+## H9: the supervisor hook and the ensemble runner (written by C, before the code)
+
+### Supervisor (`team_search(..., supervisor=...)`)
+
+```python
+from harness.team import SupervisorContext, Supervisor, team_search
+
+@dataclass
+class SupervisorContext:
+    trigger: str                 # "stall": stall_k proposals since the last accept while amdahl_gap > stall_gap
+                                 # "exhausted": the round produced no accept and the loop is about to stop
+    point: Dict                  # current design (canonical)
+    reading: Dict                # Toolbox.read(point), as in AgentContext
+    knobs: Dict[str, list]       # EVERY knob (and large-space slot) -> options; the supervisor may touch any,
+                                 # so one Move can span roles (e.g. {"xbar_tech": ..., "L3.attention": ...})
+    owners: Dict[str, str]       # knob/slot -> owning role (OWNER_KNOBS), for the prompt
+    coordinated: List[Move]      # the loop's deterministic restructure candidates for this design
+                                 # (tie / window, built from this round's role moves); [] on the small space
+    singles: List[Move]          # this round's role-agent candidates (what the team proposed)
+    history: List[Dict]          # recent proposals and outcomes (same entries as AgentContext.history)
+    accepted: List[Dict]         # the team's accepted moves so far: move, agent, term, eval_n, time_s, speedup
+    escalation: int              # 0-based index of this call in the run
+    feedback: Optional[List]     # on a retry: the verifier's violations [(rule, op, reason)] for the last move
+    budget_left: float           # evaluations left
+
+class Supervisor(Protocol):
+    name: str                    # logged (e.g. "sonnet-supervisor")
+    record: Optional[RunRecord]  # set by the loop if the attribute exists and is None (tokens go here)
+    def restructure(self, ctx: SupervisorContext) -> List[Move]: ...   # [] = no idea; ordered, best first
+```
+
+A plain callable `f(ctx) -> List[Move]` is accepted too (used by the tests).
+
+Loop behavior (`supervisor=None` keeps the M5 loop unchanged, bit for bit):
+- **When.** With a supervisor, the deterministic restructure is replaced by a call to the supervisor. It is called:
+  - on "stall": mid-round, once `stall_k` proposals have passed without an accept while the gap exceeds
+    `stall_gap`; the stall counter then resets;
+  - on "exhausted": before the loop would stop for lack of moves.
+
+  That's all; it is never called every round. `stall_k=None` means "exhausted" only. `max_escalations`
+  (default 5) caps the calls; once reached, the loop behaves as if there were no supervisor.
+- **Its moves.** They are tried in the order returned, before the rest of the round's queue. `Move.agent` is set
+  to "supervisor" and the ownership check is skipped. The `exclude` check and the verifier still apply.
+  - Illegal: no evaluation, and the supervisor is called again with `feedback`, at most `retry_budget` times per
+    escalation. Retries count as the same escalation.
+  - Accept rule: the same as the agents' (eps, area repair).
+- **Recorded.** Each escalation is appended to `TeamResult.escalations` and `RunRecord.escalations`:
+  `{"n", "trigger", "eval_n", "binding_term", "time_s", "moves": [changes...], "outcomes": [...],
+  "accepted": bool, "tokens": {model: {"in", "out"}}, "calls", "wall_s"}`.
+  - `tokens` is the change in `record.tokens` across the escalation's calls. Whatever model the supervisor
+    bills through `record.add_tokens` is attributed to that escalation.
+- **Token timeline.** `RunRecord.add_tokens(model, n_in, n_out, **extra)` also appends to `record.token_log`
+  `{"model", "in", "out", "eval_n", ...extra}`. `eval_n` comes from `record.clock()`; team_search sets
+  `record.clock = lambda: ev.used` when it is None. With this you can compute $ to the first 1% band.
+  - Pass cache splits as extra keys, e.g. `add_tokens(m, i, o, cache_read=..., cache_write=...)`; they are kept
+    per call and summed into `record.tokens[model]`.
+  - A: `cost_usd` from `lib/pricing` is yours, computed from these fields. I don't touch the pricing.
+
+### Ensemble (`harness.team.ensemble`)
+
+```python
+def ensemble(run_one: Callable[[int], Dict], seeds: List[int], *, workers=None,
+             executor="thread") -> Dict
+```
+- `run_one(seed)` runs one independent member and returns its `RunRecord.to_json(...)` dict.
+  - Use `executor="process"` only with a picklable top-level function; threads suit API-bound LLM runs.
+- It returns a merged record dict in the same schema, so the metrics code reads it unchanged:
+  - `method` = "ensemble[<member method>]", `seed` = the seeds;
+  - `members`: the full member records;
+  - `best_member`: the index with the fastest feasible final;
+  - `final`: that member's final;
+  - `cost`: evaluations, tokens per model, `token_log` (entries tagged with `member`) and `wall_s` (= max),
+    each summed over members; `wall_s_sum` = the sum;
+  - `evaluations`: the members' evaluations interleaved round-robin (lockstep members), renumbered, each tagged
+    with `member`. So "eval of first 1% band" on the merged record counts total evaluations spent by all members.
+    Under the same lockstep rule, `token_log` eval_n values are remapped to that merged count.
+  - `cost_usd`: summed over members if every member has one (A's field).
