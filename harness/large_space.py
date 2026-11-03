@@ -649,13 +649,17 @@ class FastEvaluator(Evaluator):
 @dataclass
 class DPResult:
     point: Dict
-    llm_s: float              # DP objective: the workload's LLM time (weighted, below the wall)
+    llm_s: float              # the DP's LLM time (weighted, below the wall) of the returned mapping
     states_max: int           # largest DP frontier
     transitions: int
     seconds: float
+    arrays: float = 0.0       # crossbar arrays the mapping holds at ref_ctx (sum over ops, as capacity counts)
+    objective: float = 0.0    # llm_s + lam * arrays (the minimized quantity)
+    lam: float = 0.0
 
 
-def mapping_dp(fe: FastEvaluator, hw_point, options: Optional[Dict[str, list]] = None, check_ctx=None):
+def mapping_dp(fe: FastEvaluator, hw_point, options: Optional[Dict[str, list]] = None, check_ctx=None,
+               lam=0.0, which=("plain", "vfu_attn")):
     """Minimum LLM time over every mapping (placements and KV bits) with hw_point's hardware.
 
     options: slot -> allowed values (default: all; a fixed slot gets one value). The hardware
@@ -669,7 +673,12 @@ def mapping_dp(fe: FastEvaluator, hw_point, options: Optional[Dict[str, list]] =
     (Space.to_design), which changes the VFU's op costs; so the DP runs twice, once with no
     attention on the VFU and once requiring some, each with its own library, and keeps the
     better. State: side, open crossbar group, live tensors (producer, copies), open slots
-    (attention and kv_bits of the current layer), KV bytes on the VFU.
+    (attention and kv_bits of the current layer), KV bytes on the VFU (only when the VFU's
+    memory can run out; otherwise just whether any attention is there).
+
+    lam > 0 minimizes llm_s + lam * arrays instead: arrays is the crossbar arrays every op
+    mapped to the crossbar holds at ref_ctx (Integrator._resident, the count capacity and so
+    xbar_scale and area use). which: which of the two runs to make.
     """
     t_start = time.time()
     space: LargeSpace = fe.space
@@ -677,21 +686,39 @@ def mapping_dp(fe: FastEvaluator, hw_point, options: Optional[Dict[str, list]] =
     base = {**space.start, **hw_point}
     opts = {s: list((options or {}).get(s, space.slots[s].options)) for s in space.slots}
     attn = [s.name for s in space.place_slots if s.role == "attention"]
-    runs = []
     no_vfu = {**opts, **{a: [v for v in opts[a] if v != "vfu"] for a in attn}}
-    if all(no_vfu[a] for a in attn):
-        runs.append(_dp_run(fe, base, no_vfu, False, check_ctx))
-    if any("vfu" in opts[a] for a in attn):
-        runs.append(_dp_run(fe, base, opts, True, check_ctx))
+    runs = []
+    if "plain" in which and all(no_vfu[a] for a in attn):
+        runs.append(_dp_run(fe, base, no_vfu, False, check_ctx, lam))
+    if "vfu_attn" in which and any("vfu" in opts[a] for a in attn):
+        runs.append(_dp_run(fe, base, opts, True, check_ctx, lam))
     runs = [r for r in runs if r is not None]
-    best = min(runs, key=lambda r: r.llm_s)
+    if not runs:
+        return None
+    best = min(runs, key=lambda r: r.objective)
     best.seconds = time.time() - t_start
     best.states_max = max(r.states_max for r in runs)
     best.transitions = sum(r.transitions for r in runs)
     return best
 
 
-def _dp_run(fe, base, options, need_vfu_attn, check_ctx):
+def xbar_arrays(fe, i, t, kb):
+    """Crossbar arrays op i holds on tech t at ref_ctx (0 off a crossbar): Integrator._resident's count."""
+    space = fe.space
+    if t.kind != "crossbar":
+        return 0.0
+    memo = fe.__dict__.setdefault("_arrays_memo", {})
+    op = fe.tables.ops[i]
+    k = (op.sig, Tables.tech_key(t, 0), kb)
+    if k not in memo:
+        o = space._ref_ops[i]
+        d = Design(mapping={o.name: t.name}, kv_bits=kb)
+        memo[k] = float(sum(u for _, _, _, u in Integrator(space.model, {t.name: t})._resident(
+            d, space.ref_ctx, [o])))
+    return memo[k]
+
+
+def _dp_run(fe, base, options, need_vfu_attn, check_ctx, lam=0.0):
     space: LargeSpace = fe.space
     T = fe.tables
     design, lib = space.fixed_hardware(base, need_vfu_attn)
@@ -700,6 +727,8 @@ def _dp_run(fe, base, options, need_vfu_attn, check_ctx):
     vfu = space.vfu
     cap_vfu = Integrator(space.model, lib)._have(design, vfu + ":bytes")
     ops_check = O.forward_ops(space.model, 1, check_ctx or fe.max_ctx)
+    max_kv = sum(o.kv_read_elems * 16 / 8 for o in ops_check if o.cls == O.MVM_DYNAMIC)
+    kv_track = cap_vfu < max_kv         # else the VFU's memory cannot run out: track only "any"
 
     last, slot_of, kv_of, first_i, last_i = {}, {}, {}, {}, {}
     for i, op in enumerate(T.ops):
@@ -723,12 +752,12 @@ def _dp_run(fe, base, options, need_vfu_attn, check_ctx):
         return side, g, live, tuple(sorted(open_slots.items())), kvb
 
     st0 = [HOST, None, {}, {}]
-    frontier = {skey(st0, {}, 0.0): (0.0, st0, {}, 0.0, None)}
+    frontier = {skey(st0, {}, 0.0): (0.0, 0.0, 0.0, st0, {}, 0.0, None)}
     states_max, transitions = 1, 0
     for i, op in enumerate(T.ops):
         s, kvs = slot_of[i], kv_of.get(i)
         nxt = {}
-        for cost, st, open_slots, kvb, back in frontier.values():
+        for cost, tm, arr, st, open_slots, kvb, back in frontier.values():
             if s is None:
                 choices = [(None, space.host)]
             elif s in open_slots:
@@ -755,9 +784,13 @@ def _dp_run(fe, base, options, need_vfu_attn, check_ctx):
                     st2 = ch.advance([st[0], st[1], dict(st[2]), dict(st[3])], i, tname, kb, add)
                     kvb2 = kvb
                     if lib[tname].kind in ("digital", "dram_pim") and op.cls == O.MVM_DYNAMIC:
-                        kvb2 = kvb + ops_check[i].kv_read_elems * kb / 8
-                        if kvb2 > cap_vfu:
-                            continue
+                        if kv_track:
+                            kvb2 = kvb + ops_check[i].kv_read_elems * kb / 8
+                            if kvb2 > cap_vfu:
+                                continue
+                        else:
+                            kvb2 = 1.0
+                    a = xbar_arrays(fe, i, lib[tname], kb)
                     os2 = dict(open_slots)
                     dec = {}
                     if s and s not in open_slots:
@@ -775,27 +808,28 @@ def _dp_run(fe, base, options, need_vfu_attn, check_ctx):
                     for tensor in [k for k in c2 if k not in w2]:
                         del c2[tensor]
                     k2 = skey(st2, os2, kvb2)
-                    c_new = cost + acc[0]
+                    c_new = cost + acc[0] + lam * a
                     if k2 not in nxt or c_new < nxt[k2][0]:
-                        nxt[k2] = (c_new, st2, os2, kvb2, (back, dec))
+                        nxt[k2] = (c_new, tm + acc[0], arr + a, st2, os2, kvb2, (back, dec))
         frontier = nxt
         states_max = max(states_max, len(frontier))
     best = None
-    for cost, st, _, kvb, back in frontier.values():
+    for cost, tm, arr, st, _, kvb, back in frontier.values():
         if need_vfu_attn and kvb <= 0:
             continue
         acc = [0.0]
         ch.finish(st, lambda term, kind, x: acc.__setitem__(0, acc[0] + x))
         if best is None or cost + acc[0] < best[0]:
-            best = (cost + acc[0], back)
+            best = (cost + acc[0], tm + acc[0], arr, back)
     if best is None:
         return None
-    tot, back = best
+    obj, tot, arr, back = best
     point = dict(base)
     while back is not None:
         back, dec = back
         point.update(dec)
-    return DPResult(point=point, llm_s=tot, states_max=states_max, transitions=transitions, seconds=0.0)
+    return DPResult(point=point, llm_s=tot, states_max=states_max, transitions=transitions, seconds=0.0,
+                    arrays=arr, objective=obj, lam=lam)
 
 
 # ---------------------------------------------------------------------------
