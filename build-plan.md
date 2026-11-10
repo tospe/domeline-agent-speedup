@@ -243,12 +243,14 @@ A number has one of six origins. The library records the origin of every value.
 
 | Origin | Meaning | What must be kept |
 |---|---|---|
-| `paper` | Read in a primary source | The PDF, the page, the table or section, the exact quote |
+| `paper` | Read in a published, peer-reviewed work | The venue and DOI, the PDF, the page, the table or section, the exact quote |
 | `simulator` | Output of an architecture-level tool we ran, such as NeuroSim or Eva-CAM | The simulator rules below |
 | `spice` | Output of a circuit simulation, ours or a collaborator's | The netlist or a pointer to it, the device model and its version, the corner, the testbench, the raw output, and who ran it |
 | `measured` | Our own measurement on hardware | The data file and how it was taken |
 | `derived` | A formula over other library values | The formula |
 | `custom` | A value we provide | A reason, a low and high `range`, and Tomas's approval. Without approval it does not enter the library |
+
+**Only published works count as a `paper` source.** The work must have appeared in a peer-reviewed conference or journal, and `SOURCES.yaml` records its venue and DOI. A preprint with no published version cannot supply a number. An arXiv copy may be the file you read, but if it differs from the published version, the published version decides: say which version each quote comes from. If a number exists only in a preprint, list it for Tomas; do not use it. The one exception is VIPER (arXiv 2608.23404), the authors' own work, which Tomas has allowed.
 
 #### Several candidates, one choice
 A number may have several candidate values from different origins: for example a crossbar read time from NeuroSim, from SPICE and from the ISAAC paper. The library keeps all of them. A separate file chooses which one is used.
@@ -268,7 +270,7 @@ This table is the first `profile.yaml`. If the preferred origin can't give a num
 | Crossbar: read path, write path, area, ADC | `simulator`: **NeuroSim**, run by us at the library's array size and cell | `paper`: ISAAC, ISCA 2016, Table I (the old values). `spice`: if Tomas provides results |
 | CAM | `simulator`: **Eva-CAM**, the CAM evaluation tool from X. Sharon Hu's group, run by us | `paper`: CAM designs published by that group, which Tomas names. `spice`: if Tomas provides results |
 | Transposable array | open. First check whether NeuroSim can model it. If not, Tomas names a published array or provides SPICE results | — |
-| Fixed-function unit | open. Candidate: the STAR softmax engine paper | — |
+| Fixed-function unit | open. Several published softmax units are candidates: every entry marked `fixed_function_candidate` in `library/sources/SOURCES.yaml` (STAR, Softermax, ITA, SOLE, Hyft, ConSmax and others). B1a compares them; Tomas chooses | The candidates not chosen |
 | Digital unit | open. Candidate: PUMA, ASPLOS 2019 | — |
 | Links (CXL, on-package, on-die) | open. Candidates: the specifications or measurement papers | — |
 | Effort in months | `custom`: these are conventions, each with a stated reason | — |
@@ -292,7 +294,15 @@ This table is the first `profile.yaml`. If the preferred origin can't give a num
   3. Join the two lists. Flag any symbol with no number, and any number no equation uses.
   4. Mark each number's group: crossbar read path, crossbar write path, crossbar area, digital unit, fixed-function unit, transposable array, links, effort, host (measured), GPU (measured), workload.
   5. Add the sensitivity each number had in the old study (`data/oracle/sensitivity_main.json`), so the groups can be ordered by how much they move the result.
-  6. For the crossbar group, list which rows NeuroSim can produce and which it can't. Do the same for the CAM group and Eva-CAM. For this, read each tool's manual and one example output; do not run anything yet.
+  6. For the fixed-function unit, read every `fixed_function_candidate` paper and write `library/softmax_units.md`, one row per paper:
+     - what it computes: softmax only, or norms too, and which norm (the workload uses RMSNorm, not LayerNorm);
+     - exact or approximate, and at what precision. An approximate softmax changes the function, so it needs a declared approximation and is not a drop-in unit;
+     - technology and node; measured silicon, post-layout, synthesis or simulation;
+     - area, throughput or latency per element, and energy, each with page and quote;
+     - whether the paper gives enough to fill every number the library needs for this unit.
+
+     Do not rank them by which gives the best speedup.
+  7. For the crossbar group, list which rows NeuroSim can produce and which it can't. Do the same for the CAM group and Eva-CAM. For this, read each tool's manual and one example output; do not run anything yet.
 - **Output:** `library/inventory.md`, one row per number.
 - **Then STOP 1.** Tomas reviews the list, fills the "open" rows of the preferred-sources table, and says which SPICE results exist.
 
@@ -350,7 +360,7 @@ This table is the first `profile.yaml`. If the preferred origin can't give a num
 
 - **A candidate is complete** when it has everything its origin requires in the "Where a number can come from" table. An incomplete candidate cannot be chosen by the profile.
 - **Numbers that need the most care,** because the old values were placeholders:
-  - **Fixed-function unit (STAR):** throughput, area and datapath width, from the STAR paper. This unit carries most of the speedup, so nothing here may be a custom value without Tomas seeing the paper's numbers first.
+  - **Fixed-function unit:** throughput, area and datapath width, from the unit Tomas chooses among the candidates. This unit carries most of the speedup, so nothing here may be a custom value without Tomas seeing the papers' numbers first.
   - **Transposable array:** find a published transposable or bidirectional array (ReRAM or SRAM) and take its area overhead and write cost from it. The old +15% area was a guess.
   - **Links:** bandwidth and latency for CXL, on-package and on-die, each from a specification or a measurement paper.
   - **Digital unit (PUMA):** lane width and clock, from the paper's tables.
@@ -373,10 +383,10 @@ This table is the first `profile.yaml`. If the preferred origin can't give a num
 - **Part 3, reduced libraries.** Move the T and F options to `library/removed/`. Write a loader that takes a library name (`full`, `-T`, `-F`, `-TF`).
   - −T keeps the cell write latency, the array geometry, and every primitive T was built from.
   - −F keeps the catalog from part 4 and every primitive F was built from.
-- **Part 4, catalog.** Write `library/catalog.yaml`: 5 published hardware blocks, each sourced by the B1b procedure. One is the STAR softmax engine. The other 4 are published blocks that do not compute softmax or norms. An agent may use a catalog block only by citing its `id`. If you can't source 4, use what you have and report the count.
+- **Part 4, catalog.** Write `library/catalog.yaml`: 5 published hardware blocks, each sourced by the B1b procedure. It holds the softmax unit Tomas chose for the fixed-function unit, and at least 4 published blocks that do not compute softmax or norms. An agent may use a catalog block only by citing its `id`. If you can't source 4, use what you have and report the count.
 - **Part 5, matching rules.** Write `scripts/match_mechanisms.py`, applied only after a run. An accepted option counts as:
   - **T** if it cuts a K append from *d_head* row writes to O(1) writes per token and declares an area cost;
-  - **F** if it runs softmax and norms beside the arrays on the STAR catalog block.
+  - **F** if it runs softmax and norms beside the arrays on the catalog's softmax block.
 - **Part 6, worlds.** Numeric overrides on the base file: `dev.yaml` (each `custom` number set to a random point inside its range, and each number with several candidates set to a random one of them, seed 0), `W1.yaml` (cell write latency ÷100), `W2.yaml` (link latency and bandwidth 10× better, host element-wise operators 10× faster).
 - **Part 7, freeze.** Write `library/VERSION` with the hash of the library files and a one-page summary: how many chosen numbers have each origin, and the list of custom ones. This is library v1. A later change makes v2 and reruns everything that used v1.
 - **Done when:** every number in `primitives.yaml` has a complete candidate chosen by `profile.yaml`, and no `custom` candidate is chosen without approval.
